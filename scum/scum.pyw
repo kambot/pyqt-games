@@ -5,7 +5,7 @@ import math
 from PyQt5.QtWidgets import *
 from PyQt5.QtGui import QKeyEvent, QPainter,QImage, QPen, QIcon, QPixmap, QColor, QBrush, QCursor, QFont, QPalette, QTransform, QLinearGradient, QFontMetrics
 from PyQt5.QtCore import Qt, QPoint, QPointF, QSize, QEvent, QTimer, QCoreApplication, QRect
-
+from datetime import datetime
 
 def bound(_val, _min, _max):
     return max(min(_val, _max), _min)
@@ -16,8 +16,8 @@ def printf(fmt, *args):
     else:
         print(fmt, end="")
 
-class ExplosionAnimation():
-    def __init__(self, x, y):
+class Explosion():
+    def __init__(self, x, y, damaging):
         # self.spawnx, self.spawny = gui.adj_coords(x,y)
         self.x = x
         self.y = y
@@ -32,6 +32,8 @@ class ExplosionAnimation():
                 QColor(0xff, 0xa5, 0x00),
             ]
         self.color = choice(self.colors)
+        self.damaging = damaging
+        self.damaging = True
 
     def update(self):
 
@@ -54,7 +56,7 @@ class Bullet():
     # 0: small, weak, fast
     # 1: big, strong, slow
 
-    def __init__(self, x, y, angle, _type):
+    def __init__(self, x, y, angle, _type, explosive, speed_mult=1):
         self.spawnx, self.spawny = gui.adj_coords(x,y)
         self.fx = x
         self.fy = y
@@ -65,16 +67,17 @@ class Bullet():
         self.angle = angle
         self.delete = False
         self.type = _type
+        self.explosive = explosive
         # self.xs = []
-        # self.ys = []
+        # self.ys = [] 
 
         if(self.type == 0):
             self.r = 2
-            self.dist = 8
+            self.dist = 8*speed_mult
             self.color = Qt.cyan
         elif(self.type == 1):
             self.r = 6
-            self.dist = 2.5
+            self.dist = 2.5*speed_mult
             self.color = Qt.green
         else:
             printf("Bullet invalid type: %d\n", self.type)
@@ -183,7 +186,7 @@ class Enemy():
 class MainWindow(QMainWindow):
 
     def init_game_objects(self):
-        self.exp_anims = []
+        self.explosions = []
         self.bullets = []
         self.enemies = []
 
@@ -196,6 +199,10 @@ class MainWindow(QMainWindow):
         # tip, left leg, right leg, middle
         self.player_shape = []
         self.player_angle = 0
+
+        self.invincible = False
+        self.rapid_fire = False
+        self.explosive = False
 
         self.player_radius = 12.5
         self.update_player()
@@ -241,9 +248,15 @@ class MainWindow(QMainWindow):
         self.lclick = False
         self.rclick = False
 
+        self.lclick_period_default = 80
+        self.rclick_period_default = 500
+
+        # rapid fire
+        self.lclick_period_rf = 20
+
         # fire period if held (ms)
-        self.lclick_period = 60
-        self.rclick_period = 500
+        self.lclick_period = self.lclick_period_default
+        self.rclick_period = self.rclick_period_default
 
         self.lclick_cooldown = 0
         self.rclick_cooldown = 0
@@ -264,8 +277,16 @@ class MainWindow(QMainWindow):
         self.timer.timeout.connect(self.timer_cb)
         self.timer.start(self.timer_ms)
 
+        # self.time_ms = 0
+        # self.t0 = datetime.now()
+        # self.dt = 0
+
+        self.enemy_spawn_t0 = 0
+
+
         self.initialized = True
         self.repaint()
+
 
     def __init__(self):
         super().__init__()
@@ -299,22 +320,28 @@ class MainWindow(QMainWindow):
 
     def reload(self):
         self.init_game_objects()
-        self.enemies = []
-        self.bullets = []
-        self.exp_anims = []
-
-
 
     def timer_cb(self):
 
         if(not(self.paused)):
 
+            # t = datetime.now()
+            # dt = (t-self.t0).microseconds/1000
+            # self.time_ms += dt
+            # self.t0 = t
+            # self.dt = int(dt)
             self.time += self.timer_ms
 
-            # if(self.time % 992 == 0):
-            #     print(self.time)
 
-            # self.poll_cursor(True)
+            if(self.time - self.enemy_spawn_t0 >= 1000):
+                self.enemy_spawn_t0 = self.time
+                self.spawn_enemy(0,0,1)
+
+
+            # print(self.time, self.time_ms, self.dt)
+            # print(self.time)
+
+
             self.click_timer()
 
             self.bullets_update()
@@ -323,12 +350,10 @@ class MainWindow(QMainWindow):
             self.enemies_update()
             self.bullets_check_collision() # bullets/enemies
             self.enemies_check_collision() # player/enemies
+            self.explosions_check_collision()
 
-            self.exp_anims_update()
-            self.exp_anims_delete()
-
-        # else:
-        #     self.poll_cursor_paused()
+            self.explosions_update()
+            self.explosions_delete()
 
         self.repaint()
 
@@ -348,7 +373,7 @@ class MainWindow(QMainWindow):
         self.draw_bullets(painter)
         self.draw_player(painter)
         self.draw_enemies(painter)
-        self.exp_anims_draw(painter)
+        self.explosions_draw(painter)
         self.draw_mouse(painter)
 
         self.draw_arena(painter)
@@ -359,18 +384,21 @@ class MainWindow(QMainWindow):
 
     def click_timer(self):
 
+        x = self.player_shape[0][0]
+        y = self.player_shape[0][1]
+        speed_mult = 1
+
         if(self.lclick):
             self.lclick_cooldown -= self.timer_ms
             if(self.lclick_cooldown <= 0):
-                b = Bullet(self.player_shape[0][0], self.player_shape[0][1], self.player_angle, 0)    # spawn at player tip
-                self.bullets.append(b)
+                if(self.rapid_fire): speed_mult = 1.1
+                self.spawn_bullet(x, y, self.player_angle, 0, False, speed_mult)
                 self.lclick_cooldown = self.lclick_period
 
         if(self.rclick):
             self.rclick_cooldown -= self.timer_ms
             if(self.rclick_cooldown <= 0):
-                b = Bullet(self.player_shape[0][0], self.player_shape[0][1], self.player_angle, 1)    # spawn at player tip
-                self.bullets.append(b)
+                self.spawn_bullet(x, y, self.player_angle, 1, False, speed_mult)
                 self.rclick_cooldown = self.rclick_period
 
     # bottom left is origin
@@ -413,6 +441,17 @@ class MainWindow(QMainWindow):
         painter.setPen(pen)
         painter.setBrush(bc)
         painter.drawEllipse(int(x-r),int(y-r),int(r*2),int(r*2))
+
+    def draw_line(self, painter, x1, y1, x2, y2, pw, pc, bc):
+        pen = QPen()
+        pen.setWidth(pw)
+        pen.setColor(pc)
+
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(pen)
+        painter.setBrush(bc)
+        painter.drawLine(int(x1), int(y1), int(x2), int(y2))
+        # painter.drawEllipse(int(x-r),int(y-r),int(r*2),int(r*2))
 
     def calc_player_shape(self, x, y, radius, angle):
 
@@ -532,8 +571,20 @@ class MainWindow(QMainWindow):
 
     def draw_mouse(self, painter):
         if(not(self.debug or self.show_mouse)): return
-        self.draw_circle(painter, self.mouse_x, self.mouse_y, 2, 1, Qt.black, self.color_none)
+        # self.draw_circle(painter, self.mouse_x, self.mouse_y, 1, 1, Qt.black, self.color_none)
 
+        l = 2
+        x1 = self.mouse_x-l
+        x2 = self.mouse_x+l
+        y1 = self.mouse_y
+        y2 = self.mouse_y
+        self.draw_line(painter, x1, y1, x2, y2, 1, Qt.black, self.color_none)
+
+        x1 = self.mouse_x
+        x2 = self.mouse_x
+        y1 = self.mouse_y-l
+        y2 = self.mouse_y+l
+        self.draw_line(painter, x1, y1, x2, y2, 1, Qt.black, self.color_none)
 
     def draw_angle(self, painter):
         if(not(self.debug)): return
@@ -579,6 +630,12 @@ class MainWindow(QMainWindow):
         return (angle, mag)
 
     def update_player(self):
+
+        if(self.rapid_fire):
+            self.lclick_period = self.lclick_period_rf
+        else:
+            self.lclick_period = self.lclick_period_default
+
         self.player_angle = self.calc_angle(self.mouse_x, self.player_x, self.mouse_y, self.player_y)
         # self.player_angle, mag = self.calc_angle_magnitude(self.mouse_x, self.player_x, self.mouse_y, self.player_y)
         self.player_shape = self.calc_player_shape(self.player_x, self.player_y, self.player_radius, self.player_angle)
@@ -590,36 +647,6 @@ class MainWindow(QMainWindow):
         x = pos.x()
         y = pos.y()
         return x,y
-
-    def poll_cursor(self):
-        return
-        x,y = self.get_cursor_pos()
-        if(x == self.mouse_x and y == self.mouse_y): return
-
-        if(self.paused):
-            self.mouse_x = x
-            self.mouse_y = y
-        # else:
-        # # mouse_off_window = self.off_window(x, y)
-        # # if(mouse_off_window):
-        # #     gpos = self.mapToGlobal(QPoint(self.mouse_x, self.mouse_y))
-        # #     pa.moveTo(gpos.x(), gpos.y())
-
-        # self.mouse_off_window = self.off_window(x, y)
-
-        # # if(self.mouse_off_window):
-        # if((off_window_condition and self.mouse_off_window) or not(off_window_condition)):
-        #     self.mouse_x = x
-        #     self.mouse_y = y
-        #     self.update_player()
-        #     # self.repaint()
-
-
-    def poll_cursor_paused(self):
-        x,y = self.get_cursor_pos()
-        if(x == self.mouse_x and y == self.mouse_y): return
-        self.mouse_x = x
-        self.mouse_y = y
 
 
     def mouseMoveEvent(self, event):
@@ -649,37 +676,47 @@ class MainWindow(QMainWindow):
         if(b != Qt.RightButton and b != Qt.LeftButton):
             return
 
-        if(b == Qt.LeftButton):
-            self.lclick_cooldown = self.lclick_period+60
-            self.lclick = True
-            t = 0
+        speed_mult = 1
+        explosive = False
 
-        if(b == Qt.RightButton):
+        if(b == Qt.LeftButton):
+            self.lclick_cooldown = self.lclick_period+80
+            self.lclick = True
+            _type = 0
+            if(self.rapid_fire): speed_mult = 1.1
+            explosive = self.explosive
+        else:
             self.rclick_cooldown = self.rclick_period
             self.rclick = True
-            t = 1
+            _type = 1
+
+        x = self.player_shape[0][0]
+        y = self.player_shape[0][1]
+
+        self.spawn_bullet(x, y, self.player_angle, _type, explosive, speed_mult)
+
 
         # pos = event.pos()
         # x = pos.x()
         # y = pos.y()
         # print(x,y)
 
-        b = Bullet(self.player_shape[0][0], self.player_shape[0][1], self.player_angle, t)    # spawn at player tip
-        # # b = Bullet(self.player_x, self.player_y, self.player_angle)
-        self.bullets.append(b)
+
+        # b = Bullet(self.player_shape[0][0], self.player_shape[0][1], self.player_angle, t, speed_mult)    # spawn at player tip
+        # # # b = Bullet(self.player_x, self.player_y, self.player_angle)
+        # self.bullets.append(b)
 
     def mouseReleaseEvent(self, event):
         b = event.button()
-
         if(b == Qt.LeftButton):
             self.lclick = False
-
         if(b == Qt.RightButton):
             self.rclick = False
 
 
-
     def eventFilter(self,source,event):
+
+        # t = datetime.now()
 
         if(event is None): return 0
 
@@ -697,12 +734,11 @@ class MainWindow(QMainWindow):
                 if(key == Qt.Key_P):
                     self.paused = not(self.paused)
                     if(self.paused):
-                        # self.show_mouse = True
+                        # self.time_ms += (t-self.t0).microseconds/1000
                         self.lclick = False
                         self.rclick = False
                     else:
-                        # self.show_mouse = False
-                        # self.poll_cursor()
+                        # self.t0 = t
                         self.update_player()
                         # self.repaint()
 
@@ -716,7 +752,7 @@ class MainWindow(QMainWindow):
 
                 elif(key == Qt.Key_X):
                     x,y = self.get_cursor_pos()
-                    self.spawn_explosion(x,y)
+                    self.spawn_explosion(x,y,False)
                 
                 elif(key == Qt.Key_E):
                     x,y = self.get_cursor_pos()
@@ -740,6 +776,12 @@ class MainWindow(QMainWindow):
                     pass
 
         return 0
+
+    def spawn_bullet(self, x, y, angle, _type, explosive, speed_mult):
+        b = Bullet(x, y, angle, _type, explosive, speed_mult)    # spawn at player tip
+        # b = Bullet(self.player_shape[0][0], self.player_shape[0][1], self.player_angle, t, speed_mult)    # spawn at player tip
+        self.bullets.append(b)
+
 
     def draw_bullets(self, painter):
         for i in range(len(self.bullets)):
@@ -770,8 +812,7 @@ class MainWindow(QMainWindow):
                 if(dist < (e.r + b.r)):
                     e.delete = True
                     b.delete = True
-                    ea = ExplosionAnimation(b.x,b.y)
-                    self.exp_anims.append(ea)
+                    self.spawn_explosion(b.x, b.y, b.explosive)
                     continue
         self.enemies_delete()
         self.bullets_delete()
@@ -782,11 +823,24 @@ class MainWindow(QMainWindow):
             dist = self.calc_magnitude(self.player_x, e.x, self.player_y, e.y)
             if(dist < (e.r + self.player_radius)):
                 e.delete = True
-                ea = ExplosionAnimation(e.x, e.y)
-                self.exp_anims.append(ea)
+                if(self.invincible): continue
+                self.spawn_explosion(e.x, e.y, False)
                 self.player_lives -= 1
                 continue
         self.bullets_delete()
+
+    def explosions_check_collision(self):
+        for i in range(len(self.explosions)):
+            b = self.explosions[i]
+            if(not(b.damaging)): continue
+            for j in range(len(self.enemies)):
+                e = self.enemies[j]
+                if(e.delete): continue
+                dist = self.calc_magnitude(b.x, e.x, b.y, e.y)
+                if(dist < (e.r + b.r)):
+                    e.delete = True
+                    continue
+        self.enemies_delete()
 
     def spawn_enemy(self,x,y,_type):
         e = Enemy(x,y,_type)
@@ -811,28 +865,28 @@ class MainWindow(QMainWindow):
             e = self.enemies[i]
             e.draw(painter)
 
-    def exp_anims_update(self):
-        for i in range(len(self.exp_anims)):
-            e = self.exp_anims[i]
+    def explosions_update(self):
+        for i in range(len(self.explosions)):
+            e = self.explosions[i]
             e.update()
 
-    def exp_anims_delete(self):
-        exp_anims = self.exp_anims.copy()
-        self.exp_anims = []
-        for i in range(len(exp_anims)):
-            e = exp_anims[i]
+    def explosions_delete(self):
+        explosions = self.explosions.copy()
+        self.explosions = []
+        for i in range(len(explosions)):
+            e = explosions[i]
             if(not e.delete):
-                self.exp_anims.append(e)
-        return len(self.exp_anims)
+                self.explosions.append(e)
+        return len(self.explosions)
 
-    def exp_anims_draw(self, painter):
-        for i in range(len(self.exp_anims)):
-            e = self.exp_anims[i]
+    def explosions_draw(self, painter):
+        for i in range(len(self.explosions)):
+            e = self.explosions[i]
             e.draw(painter)
 
-    def spawn_explosion(self, x, y):
-        e = ExplosionAnimation(x,y)
-        self.exp_anims.append(e)
+    def spawn_explosion(self, x, y, damaging):
+        e = Explosion(x,y,damaging)
+        self.explosions.append(e)
 
 
     def draw_gradient_rect(self, painter, rect, lgradient, color, alpha):
