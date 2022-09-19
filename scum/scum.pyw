@@ -72,7 +72,7 @@ class Bullet():
         # self.ys = [] 
 
         if(self.type == 0):
-            self.r = 2
+            self.r = 2 # TODO
             self.dist = 8*speed_mult
             self.color = Qt.cyan
         elif(self.type == 1):
@@ -81,7 +81,10 @@ class Bullet():
             self.color = Qt.green
         else:
             printf("Bullet invalid type: %d\n", self.type)
-
+            self.r = 0
+            self.dist = 0
+            self.color = gui.color_none
+            self.delete = True
 
     def update(self):
         ax, ay = gui.adj_coords(self.fx, self.fy)
@@ -194,6 +197,7 @@ class MainWindow(QMainWindow):
         self.mouse_off_window = self.off_window(self.mouse_x, self.mouse_y)
 
         self.player_lives = 3
+        self.player_kills = 0
         self.player_x = self.center_x
         self.player_y = self.center_y
         # tip, left leg, right leg, middle
@@ -203,6 +207,10 @@ class MainWindow(QMainWindow):
         self.invincible = False
         self.rapid_fire = False
         self.explosive = False
+
+        self.set_click_selection(True, 0)
+        self.set_click_selection(False, -1)
+
 
         self.player_radius = 12.5
         self.update_player()
@@ -244,22 +252,58 @@ class MainWindow(QMainWindow):
         self.arena_h = self.br_y - self.tr_y
 
 
-        # held or not
-        self.lclick = False
-        self.rclick = False
+        # types of bullets
+        self.bullet_params = [
+            {
+                "fire_period":80,
+                "rapid_fire_period":20,
+                "r":2,
+                "speed":8
+            },
+            {
+                "fire_period":500,
+                "rapid_fire_period":200,
+                "r":6,
+                "speed":2.5
+            },
+        ]
 
-        self.lclick_period_default = 80
-        self.rclick_period_default = 500
+        self.click_params = {
 
-        # rapid fire
-        self.lclick_period_rf = 20
+            "l":
+            {
+                "held":False,
+                "fire_period":0,
+                "cooldown":0,
+                "selection":0
+            },
 
-        # fire period if held (ms)
-        self.lclick_period = self.lclick_period_default
-        self.rclick_period = self.rclick_period_default
+            "r":
+            {
+                "held":False,
+                "fire_period":0,
+                "cooldown":0,
+                "selection":0
+            }
+        }
 
-        self.lclick_cooldown = 0
-        self.rclick_cooldown = 0
+
+        # # held or not
+        # self.lclick_held = False
+        # self.rclick_held = False
+
+        # self.lclick_period_default = 80
+        # self.rclick_period_default = 500
+
+        # # rapid fire
+        # self.lclick_period_rf = 20
+
+        # # fire period if held (ms)
+        # self.lclick_period = self.lclick_period_default
+        # self.rclick_period = self.rclick_period_default
+
+        # self.lclick_cooldown = 0
+        # self.rclick_cooldown = 0
 
 
         # edge detection
@@ -333,7 +377,7 @@ class MainWindow(QMainWindow):
             self.time += self.timer_ms
 
 
-            if(self.time - self.enemy_spawn_t0 >= 1000):
+            if(self.time - self.enemy_spawn_t0 >= 1000 and len(self.enemies) < 3):
                 self.enemy_spawn_t0 = self.time
                 self.spawn_enemy(0,0,1)
 
@@ -378,28 +422,55 @@ class MainWindow(QMainWindow):
 
         self.draw_arena(painter)
         self.draw_player_lives(painter)
+        self.draw_weapon_selection(painter)
+        self.draw_player_kills(painter)
 
         self.draw_pause(painter)
 
 
     def click_timer(self):
 
+        if(self.click_params["l"]["held"]):
+            self.click(True, True)
+
+        if(self.click_params["r"]["held"]):
+            self.click(False, True)
+
+
+
+    def set_click_selection(self, left, _type):
+        if(left): _key = "l"
+        else: _key = "r"
+        self.click_params[_key]["selection"] = _type
+        self.set_rapid_fire(self.rapid_fire)
+
+    def click(self, left, hold):
+
+        if(left): _key = "l"
+        else: _key = "r"
+
+        if(self.click_params[_key]["selection"] < 0): return
+
+        if(hold):
+            self.click_params[_key]["cooldown"] -= self.timer_ms
+            if(self.click_params[_key]["cooldown"] > 0): return
+            self.click_params[_key]["cooldown"] = self.click_params[_key]["fire_period"]
+            # if(not(left)):
+            #     print(self.click_params[_key]["cooldown"])
+
+
+
         x = self.player_shape[0][0]
         y = self.player_shape[0][1]
         speed_mult = 1
+        explosive = False
+        _type = self.click_params[_key]["selection"]
 
-        if(self.lclick):
-            self.lclick_cooldown -= self.timer_ms
-            if(self.lclick_cooldown <= 0):
-                if(self.rapid_fire): speed_mult = 1.1
-                self.spawn_bullet(x, y, self.player_angle, 0, False, speed_mult)
-                self.lclick_cooldown = self.lclick_period
+        if(self.rapid_fire): speed_mult = 1.1
+        explosive = self.explosive
 
-        if(self.rclick):
-            self.rclick_cooldown -= self.timer_ms
-            if(self.rclick_cooldown <= 0):
-                self.spawn_bullet(x, y, self.player_angle, 1, False, speed_mult)
-                self.rclick_cooldown = self.rclick_period
+        self.spawn_bullet(x, y, self.player_angle, _type, explosive, speed_mult)
+
 
     # bottom left is origin
     def adj_coords(self, window_x, window_y):
@@ -529,26 +600,59 @@ class MainWindow(QMainWindow):
 
         return
 
+    def draw_weapon_selection(self, painter):
+        y = self.bl_y + 5
+        x = self.bl_x
+
+        ls = self.click_params["l"]["selection"]
+        rs = self.click_params["r"]["selection"]
+
+        pen = QPen()
+        pen.setWidth(1)
+        pen.setColor(Qt.black)
+        painter.setPen(pen)
+        painter.setBrush(Qt.black)
+        font = QFont("arial")
+        font.setPixelSize(16)
+        fm = QFontMetrics(font)
+
+        _str = str(ls) + " | "
+        if(rs >= 0):
+            _str += str(rs)
+        else:
+            _str += "-"
+
+        # x += -1*fm.width(_str)
+        y += fm.height()
+
+        painter.setFont(font)
+        painter.drawText(x, y, _str)
+
+    def draw_player_kills(self, painter):
+        y = self.tr_y - 5
+        x = self.tr_x
+
+        pen = QPen()
+        pen.setWidth(1)
+        pen.setColor(Qt.black)
+        painter.setPen(pen)
+        painter.setBrush(Qt.black)
+        font = QFont("arial")
+        font.setPixelSize(16)
+        fm = QFontMetrics(font)
+
+        _str = "Kills: "+str(self.player_kills)
+
+        x += -1*fm.width(_str)
+
+        painter.setFont(font)
+        painter.drawText(x, y, _str)
 
     def draw_player(self, painter):
-
         if(self.debug):
             self.draw_circle(painter, self.player_x, self.player_y, self.player_radius, 1, Qt.blue, self.color_none)
 
         self.draw_player_shape(painter, self.player_shape)
-
-        # pen = QPen()
-        # pen.setWidth(2)
-        # pen.setColor(Qt.black)
-
-        # painter.setPen(pen)
-        # c = self.color_none
-        # painter.setBrush(c)
-        # # painter.setBrush(Qt.black)
-
-        # for i in range(0,len(self.player_shape)) :
-        #     x0,y0,x1,y1 = self.player_shape[i]
-        #     painter.drawLine(int(x1), int(y1), int(x0), int(y0))
 
 
     def draw_pause(self, painter):
@@ -629,12 +733,23 @@ class MainWindow(QMainWindow):
         angle = self.calc_angle(x, x0, y, y0)
         return (angle, mag)
 
-    def update_player(self):
 
-        if(self.rapid_fire):
-            self.lclick_period = self.lclick_period_rf
-        else:
-            self.lclick_period = self.lclick_period_default
+    def set_rapid_fire(self, enable):
+        self.rapid_fire = enable
+
+        ls = self.click_params["l"]["selection"]
+        rs = self.click_params["r"]["selection"]
+
+        if(self.rapid_fire): _key = "rapid_fire_period"
+        else: _key = "fire_period"
+
+        if(ls >= 0 and ls < len(self.bullet_params)):
+            self.click_params["l"]["fire_period"] = self.bullet_params[ls][_key]
+        if(rs >= 0 and rs < len(self.bullet_params)):
+            self.click_params["r"]["fire_period"] = self.bullet_params[rs][_key]
+
+
+    def update_player(self):
 
         self.player_angle = self.calc_angle(self.mouse_x, self.player_x, self.mouse_y, self.player_y)
         # self.player_angle, mag = self.calc_angle_magnitude(self.mouse_x, self.player_x, self.mouse_y, self.player_y)
@@ -676,42 +791,24 @@ class MainWindow(QMainWindow):
         if(b != Qt.RightButton and b != Qt.LeftButton):
             return
 
-        speed_mult = 1
-        explosive = False
+        left = (b == Qt.LeftButton)
+        if(left): _key = "l"
+        else: _key = "r"
 
-        if(b == Qt.LeftButton):
-            self.lclick_cooldown = self.lclick_period+80
-            self.lclick = True
-            _type = 0
-            if(self.rapid_fire): speed_mult = 1.1
-            explosive = self.explosive
-        else:
-            self.rclick_cooldown = self.rclick_period
-            self.rclick = True
-            _type = 1
-
-        x = self.player_shape[0][0]
-        y = self.player_shape[0][1]
-
-        self.spawn_bullet(x, y, self.player_angle, _type, explosive, speed_mult)
-
-
-        # pos = event.pos()
-        # x = pos.x()
-        # y = pos.y()
-        # print(x,y)
-
-
-        # b = Bullet(self.player_shape[0][0], self.player_shape[0][1], self.player_angle, t, speed_mult)    # spawn at player tip
-        # # # b = Bullet(self.player_x, self.player_y, self.player_angle)
-        # self.bullets.append(b)
+        self.click_params[_key]["cooldown"] = self.click_params[_key]["fire_period"]
+        self.click_params[_key]["held"] = True
+        self.click(left, False)
 
     def mouseReleaseEvent(self, event):
         b = event.button()
-        if(b == Qt.LeftButton):
-            self.lclick = False
-        if(b == Qt.RightButton):
-            self.rclick = False
+
+        if(b != Qt.RightButton and b != Qt.LeftButton):
+            return
+
+        left = (b == Qt.LeftButton)
+        if(left): _key = "l"
+        else: _key = "r"
+        self.click_params[_key]["held"] = False
 
 
     def eventFilter(self,source,event):
@@ -735,8 +832,8 @@ class MainWindow(QMainWindow):
                     self.paused = not(self.paused)
                     if(self.paused):
                         # self.time_ms += (t-self.t0).microseconds/1000
-                        self.lclick = False
-                        self.rclick = False
+                        self.click_params["l"]["held"] = False
+                        self.click_params["r"]["held"] = False
                     else:
                         # self.t0 = t
                         self.update_player()
@@ -762,15 +859,12 @@ class MainWindow(QMainWindow):
                 elif(key == Qt.Key_M):
                     self.show_mouse = not(self.show_mouse)
 
-                # elif(key == Qt.Key_F11):
-                #     if(self.isFullScreen()):
-                #         # self.hide()
-                #         self.showNormal()
-                #         self.setWindowState(Qt.WindowMaximized)
-                #         # self.show()
-                #     else:
-                #         self.showFullScreen()
-                #         # self.setWindowState(Qt.WindowMaximized)
+                elif(key >= Qt.Key_0 and key <= Qt.Key_9):
+                    sel = key - Qt.Key_0
+                    self.set_click_selection(False, sel)
+
+                elif(key == Qt.Key_Minus):
+                    self.set_click_selection(False, -1)
 
                 elif(key == Qt.Key_Escape):
                     pass
@@ -812,6 +906,7 @@ class MainWindow(QMainWindow):
                 if(dist < (e.r + b.r)):
                     e.delete = True
                     b.delete = True
+                    self.player_kills += 1
                     self.spawn_explosion(b.x, b.y, b.explosive)
                     continue
         self.enemies_delete()
