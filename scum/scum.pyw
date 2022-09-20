@@ -121,26 +121,37 @@ class Enemy():
         self.type = _type
         self.color = QColor(params["color"])
         self.angle_range = 60
+        self.t0 = gui.time
+        self.tracking_state = 0
 
         self.update_angle()
 
 
-    # def rand_angle(self):
+    def rand_angle(self):
+        urange = int(self.angle_range/2)
+        lrange = urange * -1
+        rad = gui.calc_angle(gui.player_x, self.fx, gui.player_y, self.fy)
+        deg = rad*180/math.pi
+        deg += choice(range(lrange,urange))
+        self.angle = deg*math.pi/180
+
+    def player_angle(self):
+        self.angle = gui.calc_angle(gui.player_x, self.fx, gui.player_y, self.fy)
+
     def update_angle(self):
         if(self.params["tracking"]):
-            self.angle = gui.calc_angle(gui.player_x, self.fx, gui.player_y, self.fy)
+            self.angle_range = 30
+            if(self.tracking_state == 0):
+                self.tracking_state = 1
+                self.player_angle()
+            else:
+                self.tracking_state = 0
+                self.rand_angle()
         else:
-            urange = int(self.angle_range/2)
-            lrange = urange * -1
-            rad = gui.calc_angle(gui.player_x, self.fx, gui.player_y, self.fy)
-            deg = rad*180/math.pi
-            deg += choice(range(lrange,urange))
-            self.angle = deg*math.pi/180
-
+            self.rand_angle()
 
 
     def update(self):
-        # player_distance = gui.calc_magnitude(gui.player_x, self.fx, gui.player_y, self.fy)
 
         ax, ay = gui.adj_coords(self.fx, self.fy)
         x = self.speed*math.cos(self.angle)+ax
@@ -148,7 +159,6 @@ class Enemy():
         self.fx, self.fy = gui.win_coords(x,y)
         self.x = int(self.fx)
         self.y = int(self.fy)
-
         hit_side = False
 
         if((self.x-self.r) < gui.tl_x):
@@ -174,6 +184,12 @@ class Enemy():
         if(hit_side):
             self.angle_range = max(self.angle_range-10, 10)
             self.update_angle()
+
+        if(self.params["tracking"]):
+            dt = gui.time-self.t0
+            if(dt >= 1000):
+                self.update_angle()
+                self.t0 = gui.time
 
     def draw(self, painter):
         gui.draw_circle(painter, self.x, self.y, self.r, 0, gui.color_none, self.color)
@@ -294,16 +310,16 @@ class MainWindow(QMainWindow):
                 "max_radius":10,
                 "min_speed":2,
                 "max_speed":3,
-                "color":0xff0000
+                "color":0xff0000,
             },
 
             # 1
             {
                 "tracking": False,
                 "min_radius":10,
-                "max_radius":20,
+                "max_radius":28,
                 "min_speed":2,
-                "max_speed":5,
+                "max_speed":4,
                 "color":0xffa000
             },
         ]
@@ -425,7 +441,7 @@ class MainWindow(QMainWindow):
     def enemy_timer(self):
         if(self.time - self.enemy_spawn_t0 >= 1000 and len(self.enemies) < self.max_enemies):
             self.enemy_spawn_t0 = self.time
-            self.spawn_enemy(choice([0,1,1,1]))
+            self.spawn_enemy(choice([0,1,1,1])) #TODO: dynamic probabilities
 
     def paintEvent(self, event):
 
@@ -951,8 +967,8 @@ class MainWindow(QMainWindow):
                     x,y = self.get_cursor_pos()
                     # self.spawn_enemy(x,y,choice([0,1]))
                     # self.spawn_enemy(x,y,1)
-                    
-                    e = Enemy(self.enemy_params[1], 1, x, y)
+                    _type = 0
+                    e = Enemy(self.enemy_params[_type], _type, x, y)
                     self.enemies.append(e)
 
                 elif(key == Qt.Key_M):
