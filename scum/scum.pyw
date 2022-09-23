@@ -33,7 +33,7 @@ class Explosion():
             ]
         self.color = choice(self.colors)
         self.damaging = damaging
-        self.damaging = True
+        # self.damaging = True
 
     def update(self):
 
@@ -207,7 +207,7 @@ class MainWindow(QMainWindow):
         self.mouse_x, self.mouse_y = self.get_cursor_pos()
         self.mouse_off_window = self.off_window(self.mouse_x, self.mouse_y)
 
-        self.player_lives = 3
+        self.player_lives = 3+1
         self.player_kills = 0
         self.player_x = self.center_x
         self.player_y = self.center_y
@@ -235,6 +235,11 @@ class MainWindow(QMainWindow):
 
         self.intersect_x = None
         self.intersect_y = None
+
+        self.damage_counter = 0
+        self.damage_counter_max = 100
+        self.damage_counter_incr_value = 5
+        self.damage_counter_incr = 0
 
         self.update_player()
 
@@ -377,6 +382,7 @@ class MainWindow(QMainWindow):
         self.TOP_RIGHT = 2
         self.BOTTOM_LEFT = 3
         self.BOTTOM_RIGHT = 4
+        self.CENTERED_TOP = 5
 
         # edge detection
         self.grad_thresh = 100
@@ -468,6 +474,7 @@ class MainWindow(QMainWindow):
             if(self.auto_aim):
                 self.update_player()
 
+            self.player_timer()
             self.click_timer()
             self.enemy_timer()
 
@@ -521,10 +528,12 @@ class MainWindow(QMainWindow):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
 
-        self.draw_gradient_left(painter)
-        self.draw_gradient_right(painter)
-        self.draw_gradient_top(painter)
-        self.draw_gradient_bottom(painter)
+
+        # self.draw_gradient_left(painter)
+        # self.draw_gradient_right(painter)
+        # self.draw_gradient_top(painter)
+        # self.draw_gradient_bottom(painter)
+        self.draw_gradients(painter)
 
         self.draw_angle(painter)
         self.draw_bullets(painter)
@@ -673,7 +682,7 @@ class MainWindow(QMainWindow):
             return
 
         shape = self.calc_player_shape(x, y, radius, math.pi/2)
-        for i in range(self.player_lives):
+        for i in range(self.player_lives-1):
             self.draw_player_shape(painter, shape, 1)
             shape = self.translate_player_shape(shape, radius*2+5, 0)
 
@@ -705,6 +714,10 @@ class MainWindow(QMainWindow):
         if(len(_str) == 0):
             return
 
+        pen = QPen()
+        pen.setWidth(1)
+        pen.setColor(color)
+        painter.setPen(pen)
         painter.setBrush(color)
         font = QFont("arial")
         font.setPixelSize(size)
@@ -739,8 +752,17 @@ class MainWindow(QMainWindow):
         elif(orientation == self.BOTTOM_RIGHT):
             x_adj = x-w
             y_adj = y
+        elif(orientation == self.CENTERED_TOP):
+            x_adj = x-w/2-lb/2
+            y_adj = y+h-d*2
+        elif(orientation == self.CENTERED_BOTTOM):
+            x_adj = x-w/2-lb/2
+            y_adj = y
 
         painter.drawText(int(x_adj), int(y_adj), _str)
+
+        # self.draw_circle(painter, int(x), int(y), 1, 1, self.color_none, Qt.blue)
+        # self.draw_circle(painter, int(x_adj), int(y_adj), 1, 1, self.color_none, Qt.red)
         return w,h
 
 
@@ -837,6 +859,9 @@ class MainWindow(QMainWindow):
         self.draw_player_shape(painter, self.player_shape, 2)
 
     def draw_debug_info(self, painter):
+
+        self.draw_text(painter, 10, 50, self.TOP_LEFT, Qt.black, 16, "d: %d", self.damage_counter)
+        # self.draw_text(painter, 10, 50, self.TOP_LEFT, Qt.black, 16, str(self.damage_counter))
         # x = self.tl_x
         # y = self.tl_y
         # # x = 0
@@ -844,9 +869,9 @@ class MainWindow(QMainWindow):
         # self.draw_text(painter, x, y, self.CENTERED, Qt.black, 16, "DEBUG")
         # self.draw_circle(painter, x, y, 1, 1, self.color_none, Qt.red)
 
-        if(self.intersect_x is not None):
-            ix, iy = self.win_coords(self.intersect_x, self.intersect_y)
-            self.draw_circle(painter, ix, iy, 1, 1, self.color_none, Qt.green)
+        # if(self.intersect_x is not None):
+        #     ix, iy = self.win_coords(self.intersect_x, self.intersect_y)
+        #     self.draw_circle(painter, ix, iy, 1, 1, self.color_none, Qt.green)
 
 
         return
@@ -854,51 +879,27 @@ class MainWindow(QMainWindow):
 
     def draw_pause(self, painter):
         if(self.paused):
-            pen = QPen()
-            pen.setWidth(1)
-            pen.setColor(Qt.black)
-            painter.setPen(pen)
-            painter.setBrush(Qt.black)
-            # painter.drawLine(int(self.center_x), 0, int(self.center_x), self.h)
-            font = QFont("arial")
-            font.setPixelSize(24)
-            fm = QFontMetrics(font)
+            size = 24
             _str = "PAUSED"
-            x = int(self.center_x - fm.width(_str)/2)
-            y = int(self.center_y+fm.height()/2+self.player_radius+10)
-            # y = int((self.center_y-self.player_radius)*0.9)
-            painter.setFont(font)
-            painter.drawText(x, y, _str)
+            w,h = self.get_text_wh(size, _str)
+            x = self.center_x
+            y = self.center_y - h - 20
+            self.draw_text(painter, x, y, self.CENTERED, Qt.black, size, _str)
+
 
     def draw_game_over(self, painter):
+
         if(self.game_over):
-            pen = QPen()
-            pen.setWidth(1)
-            pen.setColor(Qt.red)
-            painter.setPen(pen)
-            painter.setBrush(Qt.black)
-            # painter.drawLine(int(self.center_x), 0, int(self.center_x), self.h)
-            font = QFont("arial")
-            font.setPixelSize(36)
-            fm = QFontMetrics(font)
+
+            size = 36
             _str = "GAME OVER"
-            x = int(self.center_x - fm.width(_str)/2)
-            y = int(self.center_y - fm.height()-20)
-            painter.setFont(font)
-            painter.drawText(x, y, _str)
+            w,h = self.get_text_wh(30, _str)
+            x = self.center_x
+            y = self.center_y - self.arena_h/4
+            self.draw_text(painter, x, y, self.CENTERED, Qt.red, size, _str)
 
-            font.setPixelSize(14)
-            fm = QFontMetrics(font)
-            pen.setColor(Qt.black)
-            painter.setPen(pen)
-            _str = "(press r to restart)"
-            x = int(self.center_x - fm.width(_str)/2)
-            y += fm.height()+5
-            painter.setFont(font)
-            painter.drawText(x, y, _str)
-
-
-
+            y += h/2 + 5
+            self.draw_text(painter, x, y, self.CENTERED_TOP, Qt.black, 16, "(press r to restart)")
 
 
     def draw_mouse(self, painter):
@@ -919,6 +920,7 @@ class MainWindow(QMainWindow):
         y2 = self.mouse_y+l
         self.draw_line(painter, x1, y1, x2, y2, 1, Qt.black, self.color_none)
 
+        # TODO
         self.draw_text(painter, 10, 20, self.NONE, Qt.black, 16, "%d, %d", self.mouse_x, self.mouse_y)
 
     def draw_angle(self, painter):
@@ -1040,7 +1042,7 @@ class MainWindow(QMainWindow):
 
                     intersect,x,y = self.will_intersect(
                                             shape[0][0], shape[0][1], self.bullet_params[0]["speed"], rad, self.bullet_params[0]["radius"],
-                                            e.x, e.y, e.speed, e.angle, e.r
+                                            e.fx, e.fy, e.speed, e.angle, e.r
                                         )
 
                     if(intersect):
@@ -1058,6 +1060,15 @@ class MainWindow(QMainWindow):
 
         else:
             self.click_params["l"]["held"] = False
+
+    def player_timer(self):
+        self.damage_counter += self.damage_counter_incr
+        if(self.damage_counter >= self.damage_counter_max):
+            self.damage_counter_incr *= -1
+            self.damage_counter = self.damage_counter_max
+        elif(self.damage_counter <= 0):
+            self.damage_counter_incr = 0
+            self.damage_counter = 0
 
 
     def update_player(self):
@@ -1325,7 +1336,8 @@ class MainWindow(QMainWindow):
                 self.spawn_explosion(e.x, e.y, False)
                 if(not(self.game_over)):
                     self.player_lives -= 1
-                if(self.player_lives < 0):
+                    self.damage_counter_incr = self.damage_counter_incr_value
+                if(self.player_lives == 0):
                     self.game_over = True
                 continue
         self.bullets_delete()
@@ -1423,57 +1435,94 @@ class MainWindow(QMainWindow):
         painter.setPen(pen)
         painter.drawRect(rect)
 
-    def draw_gradient_left(self, painter):
-        if(self.mouse_x > self.grad_thresh):
+    # TODO
+    def draw_gradients(self, painter):
+
+        alpha = int(self.damage_counter / self.damage_counter_max * 255)
+        color = QColor(0xff, 0, 0)
+
+        if(alpha == 0):
             return
 
-        alpha = (1 - self.mouse_x / self.grad_thresh) * 255
-        if(self.mouse_x <= 0):
-            alpha = 255
+        lst = [70, 50, 30, 10]
+        if(self.player_lives >= len(lst)):
+            w_add = 0
+        else:
+            w_add = lst[self.player_lives]
 
-        color = QColor(0xff, 0, 0)
-        rect = QRect(0, 0, self.grad_width, self.h)
+        width = int(50 + w_add)
+
+        # left
+        rect = QRect(0, 0, width, self.h)
         gradient = QLinearGradient(rect.topLeft(), rect.topRight())
         self.draw_gradient_rect(painter, rect, gradient, color, alpha)
 
-    def draw_gradient_right(self, painter):
-        if((self.w-self.mouse_x) > self.grad_thresh):
-            return
-
-        alpha = (1 - (self.w-self.mouse_x) / self.grad_thresh) * 255
-        if(self.mouse_x >= self.w):
-            alpha = 255
-
-        color = QColor(0xff, 0, 0)
-        rect = QRect(self.w-self.grad_width, 0, self.grad_width, self.h)
+        # right
+        rect = QRect(self.w-width, 0, width, self.h)
         gradient = QLinearGradient(rect.topRight(), rect.topLeft())
         self.draw_gradient_rect(painter, rect, gradient, color, alpha)
 
-    def draw_gradient_top(self, painter):
-        if(self.mouse_y > self.grad_thresh):
-            return
-
-        alpha = (1 - self.mouse_y / self.grad_thresh) * 255
-        if(self.mouse_y <= 0):
-            alpha = 255
-
-        color = QColor(0xff, 0, 0)
-        rect = QRect(0, 0, self.w, self.grad_width)
+        # top
+        rect = QRect(0, 0, self.w, width)
         gradient = QLinearGradient(rect.topLeft(), rect.bottomLeft())
         self.draw_gradient_rect(painter, rect, gradient, color, alpha)
 
-    def draw_gradient_bottom(self, painter):
-        if((self.h-self.mouse_y) > self.grad_thresh):
-            return
-
-        alpha = (1 - (self.h-self.mouse_y) / self.grad_thresh) * 255
-        if(self.mouse_y > self.h):
-            alpha = 255
-
-        color = QColor(0xff, 0, 0)
-        rect = QRect(0, self.h-self.grad_width, self.w, self.grad_width)
+        # bottom
+        rect = QRect(0, self.h-width, self.w, width)
         gradient = QLinearGradient(rect.bottomLeft(), rect.topLeft())
         self.draw_gradient_rect(painter, rect, gradient, color, alpha)
+
+    # def draw_gradient_left(self, painter):
+    #     if(self.mouse_x > self.grad_thresh):
+    #         return
+
+    #     alpha = (1 - self.mouse_x / self.grad_thresh) * 255
+    #     if(self.mouse_x <= 0):
+    #         alpha = 255
+
+    #     color = QColor(0xff, 0, 0)
+    #     rect = QRect(0, 0, self.grad_width, self.h)
+    #     gradient = QLinearGradient(rect.topLeft(), rect.topRight())
+    #     self.draw_gradient_rect(painter, rect, gradient, color, alpha)
+
+    # def draw_gradient_right(self, painter):
+    #     if((self.w-self.mouse_x) > self.grad_thresh):
+    #         return
+
+    #     alpha = (1 - (self.w-self.mouse_x) / self.grad_thresh) * 255
+    #     if(self.mouse_x >= self.w):
+    #         alpha = 255
+
+    #     color = QColor(0xff, 0, 0)
+    #     rect = QRect(self.w-self.grad_width, 0, self.grad_width, self.h)
+    #     gradient = QLinearGradient(rect.topRight(), rect.topLeft())
+    #     self.draw_gradient_rect(painter, rect, gradient, color, alpha)
+
+    # def draw_gradient_top(self, painter):
+    #     if(self.mouse_y > self.grad_thresh):
+    #         return
+
+    #     alpha = (1 - self.mouse_y / self.grad_thresh) * 255
+    #     if(self.mouse_y <= 0):
+    #         alpha = 255
+
+    #     color = QColor(0xff, 0, 0)
+    #     rect = QRect(0, 0, self.w, self.grad_width)
+    #     gradient = QLinearGradient(rect.topLeft(), rect.bottomLeft())
+    #     self.draw_gradient_rect(painter, rect, gradient, color, alpha)
+
+    # def draw_gradient_bottom(self, painter):
+    #     if((self.h-self.mouse_y) > self.grad_thresh):
+    #         return
+
+    #     alpha = (1 - (self.h-self.mouse_y) / self.grad_thresh) * 255
+    #     if(self.mouse_y > self.h):
+    #         alpha = 255
+
+    #     color = QColor(0xff, 0, 0)
+    #     rect = QRect(0, self.h-self.grad_width, self.w, self.grad_width)
+    #     gradient = QLinearGradient(rect.bottomLeft(), rect.topLeft())
+    #     self.draw_gradient_rect(painter, rect, gradient, color, alpha)
 
     def draw_arena(self, painter):
 
