@@ -61,8 +61,8 @@ class Bullet():
         self.fy = y
         self.x = x
         self.y = y
-        self.x_prior = x
-        self.y_prior = y
+        # self.x_prior = x
+        # self.y_prior = y
         self.angle = angle
         self.delete = False
         self.type = _type
@@ -79,8 +79,8 @@ class Bullet():
         x = self.speed*math.cos(self.angle)+ax
         y = self.speed*math.sin(self.angle)+ay
         self.fx, self.fy = gui.win_coords(x,y)
-        self.x_prior = self.x
-        self.y_prior = self.y
+        # self.x_prior = self.x
+        # self.y_prior = self.y
         self.x = int(self.fx)
         self.y = int(self.fy)
         # self.xs.append(self.x)
@@ -114,8 +114,11 @@ class Enemy():
         self.fy = y
         self.x = x
         self.y = y
-        self.x_prior = x
-        self.y_prior = y
+        # # spawn point
+        # self.x0 = x
+        # self.y0 = y
+        # self.x_prior = x
+        # self.y_prior = y
         self.angle = 0
         self.delete = False
         self.type = _type
@@ -214,7 +217,7 @@ class MainWindow(QMainWindow):
         self.player_radius = 12.5
 
         self.game_stage = 0
-        self.game_stage_times = [15000,15000,15000]
+        self.game_stage_times = [15000,15000,15000,15000]
         self.game_stage_max = len(self.game_stage_times)-1
         self.game_stage_timer = self.get_game_stage_param(self.game_stage_times)
 
@@ -229,6 +232,9 @@ class MainWindow(QMainWindow):
         self.game_time = 0
         self.t0 = datetime.now()
         self.dt = 0
+
+        self.intersect_x = None
+        self.intersect_y = None
 
         self.update_player()
 
@@ -376,10 +382,12 @@ class MainWindow(QMainWindow):
         self.grad_thresh = 100
         self.grad_width = 25
 
-        self.max_enemies = [10,20,30]
-        self.enemy_spawn_time = [1000,800,500]
+        self.max_enemies = [1]
+        self.max_enemies = [10,20,30,100]
+        self.enemy_spawn_time = [1000,800,500,200]
         self.enemy_spawn_t0 = 0
 
+        self.auto_aim = False
         self.init_game_objects()
 
         self.installEventFilter(self)
@@ -456,6 +464,9 @@ class MainWindow(QMainWindow):
 
             # print(self.time, self.game_time, self.dt)
             # print(self.time)
+
+            if(self.auto_aim):
+                self.update_player()
 
             self.click_timer()
             self.enemy_timer()
@@ -631,40 +642,57 @@ class MainWindow(QMainWindow):
             )
         return new_shape
 
-    def draw_player_shape(self, painter, shape):
+    def draw_player_shape(self, painter, shape, pw):
         pen = QPen()
-        pen.setWidth(2)
+        pen.setWidth(pw)
         pen.setColor(Qt.black)
 
         painter.setPen(pen)
         c = self.color_none
         painter.setBrush(c)
-        # painter.setBrush(Qt.black)
 
         for i in range(0,len(shape)) :
             x0,y0,x1,y1 = shape[i]
             painter.drawLine(int(x1), int(y1), int(x0), int(y0))
 
     def draw_player_lives(self, painter):
+        _str = "Lives:  "
+        size = 16
+        radius = 6
+        w,h = self.get_text_wh(size, _str)
+
+        y = self.tl_y - h
+        x = self.tl_x
+
+        w,h = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, _str)
+
+        x += w
+        y += radius
 
         if(self.player_lives <= 0):
             return
 
-        y = self.tl_y - self.player_radius - 5
-        x = self.tl_x + self.player_radius
-
-        shape = self.calc_player_shape(x, y, self.player_radius, math.pi/2)
-
+        shape = self.calc_player_shape(x, y, radius, math.pi/2)
         for i in range(self.player_lives):
-            self.draw_player_shape(painter, shape)
-            shape = self.translate_player_shape(shape, self.player_radius*2+10, 0)
-
-        return
+            self.draw_player_shape(painter, shape, 1)
+            shape = self.translate_player_shape(shape, radius*2+5, 0)
 
 
+    def get_text_wh(self, size, fmt, *args):
+        if(len(args) > 0):
+            _str = fmt % args
+        else:
+            _str = fmt
 
+        if(len(_str) == 0):
+            return 0,0
 
-
+        font = QFont("arial")
+        font.setPixelSize(size)
+        fm = QFontMetrics(font)
+        w = fm.width(_str)
+        h = fm.height()
+        return w,h
 
 
     def draw_text(self, painter, x, y, orientation, color, size, fmt, *args):
@@ -677,30 +705,18 @@ class MainWindow(QMainWindow):
         if(len(_str) == 0):
             return
 
-        # pen = QPen()
-        # pen.setWidth(1)
-        # pen.setColor(color)
-        # painter.setPen(pen)
         painter.setBrush(color)
         font = QFont("arial")
         font.setPixelSize(size)
-        # font.setPointSize(size)
         painter.setFont(font)
         fm = QFontMetrics(font)
-
-
-
 
         w = fm.width(_str)
         h = fm.height()
         a = fm.ascent()
         d = fm.descent()
         l = fm.leading()
-
         lb = fm.leftBearing(_str[0])
-        # ls = fm.lineSpacing()
-
-
 
         x_adj = x
         y_adj = y
@@ -724,21 +740,8 @@ class MainWindow(QMainWindow):
             x_adj = x-w
             y_adj = y
 
-        # print(x, x_adj, abs(x-x_adj))
-        # print(y, y_adj, abs(y-y_adj))
- 
         painter.drawText(int(x_adj), int(y_adj), _str)
-
-        # pen = QPen()
-        # pen.setWidth(1)
-        # pen.setColor(Qt.green)
-        # painter.setRenderHint(QPainter.Antialiasing, True)
-        # painter.setPen(pen)
-        # painter.setBrush(self.color_none)
-        # # rect = QRect(QPoint(self.tl_x, self.tl_y), QPoint(self.tl_x+w, self.tl_y+h))
-        # # rect = QRect(QPoint(int(x), int(y-h)), QPoint(int(x+w), int(y)))
-        # rect = fm.boundingRect(_str)
-        # painter.drawRect(rect)
+        return w,h
 
 
     def draw_weapon_selection(self, painter):
@@ -763,9 +766,7 @@ class MainWindow(QMainWindow):
         else:
             _str += "-"
 
-        # x += -1*fm.width(_str)
         y += fm.height()
-
         painter.setFont(font)
         painter.drawText(x, y, _str)
 
@@ -784,9 +785,7 @@ class MainWindow(QMainWindow):
 
         _str = "Game Stage: " + str(self.game_stage+1) + " (" + str(int(self.game_stage_timer)) + ")"
 
-        # x += -1*fm.width(_str)
         y += fm.height()
-
         painter.setFont(font)
         painter.drawText(x, y, _str)
 
@@ -835,7 +834,7 @@ class MainWindow(QMainWindow):
         if(self.debug):
             self.draw_circle(painter, self.player_x, self.player_y, self.player_radius, 1, Qt.blue, self.color_none)
 
-        self.draw_player_shape(painter, self.player_shape)
+        self.draw_player_shape(painter, self.player_shape, 2)
 
     def draw_debug_info(self, painter):
         # x = self.tl_x
@@ -844,6 +843,10 @@ class MainWindow(QMainWindow):
         # # y = 0
         # self.draw_text(painter, x, y, self.CENTERED, Qt.black, 16, "DEBUG")
         # self.draw_circle(painter, x, y, 1, 1, self.color_none, Qt.red)
+
+        if(self.intersect_x is not None):
+            ix, iy = self.win_coords(self.intersect_x, self.intersect_y)
+            self.draw_circle(painter, ix, iy, 1, 1, self.color_none, Qt.green)
 
 
         return
@@ -900,6 +903,7 @@ class MainWindow(QMainWindow):
 
     def draw_mouse(self, painter):
         if(not(self.debug or self.show_mouse)): return
+        # if(self.auto_aim): return
         # self.draw_circle(painter, self.mouse_x, self.mouse_y, 1, 1, Qt.black, self.color_none)
 
         l = 3
@@ -975,11 +979,94 @@ class MainWindow(QMainWindow):
         if(rs >= 0 and rs < len(self.bullet_params)):
             self.click_params["r"]["fire_period"] = self.bullet_params[rs][_key]
 
+    def will_intersect(self, x0, y0, s0, a0, r0, x1, y1, s1, a1, r1):
+        ax0, ay0 = self.adj_coords(x0,y0)
+        ax1, ay1 = self.adj_coords(x1,y1)
+        # aox0, aoy0 = self.adj_coords(ox0,oy0)
+        # aox1, aoy1 = self.adj_coords(ox1,oy1)
+
+        n = -1 * (ax0 - ax1) / (s1*math.cos(a1))
+        d = s0*math.cos(a0) / (s1*math.cos(a1)) - 1
+        t = n/d
+
+        if(t < 0):
+            return False,None,None
+
+        xtest0 = t*s0*math.cos(a0)+ax0
+        xtest1 = t*s1*math.cos(a1)+ax1
+        ytest0 = t*s0*math.sin(a0)+ay0
+        ytest1 = t*s1*math.sin(a1)+ay1
+        # print(t, ytest0, ytest1)
+
+        # and abs(xtest0-xtest1) <= (r0+r1-0)
+        if(abs(ytest0-ytest1) <= (r0+r1-0)):
+            # printf("ax0: %d, ay0: %d, s0: %d, r0: %d")
+            # print("BANG",t, ytest0, ytest1, r0, r1)
+            # print(ax0, ay0, s0, a0, r0, ax1, ay1, s1, a1, r1)
+            # print(t,xtest0, xtest1, ytest0, ytest1)
+            # print(t)
+            return True,xtest0,ytest0
+
+        return False,None,None
+
+
+    def handle_auto_aim(self):
+        mind = 1000000
+        idx = -1
+        for i in range(len(self.enemies)):
+            e = self.enemies[i]
+            d = self.calc_magnitude(self.player_x, e.x, self.player_y, e.y)-e.r
+            if(d < mind):
+                mind = d
+                idx = i
+        if(idx != -1):
+            # if(d > 500): continue
+            e = self.enemies[idx]
+            start_angle = self.calc_angle(e.x, self.player_x, e.y, self.player_y)
+            # self.player_angle = start_angle
+
+            ls = self.click_params["l"]["selection"]
+
+            deg = start_angle*180/math.pi
+
+            intersect = False
+            for i in range(0,200):
+                for j in [-1,1]:
+
+                    deg_test = deg+i/10*j
+                    rad = deg_test*math.pi/180
+
+                    shape = self.calc_player_shape(self.player_x, self.player_y, self.player_radius, rad)
+
+                    intersect,x,y = self.will_intersect(
+                                            shape[0][0], shape[0][1], self.bullet_params[0]["speed"], rad, self.bullet_params[0]["radius"],
+                                            e.x, e.y, e.speed, e.angle, e.r
+                                        )
+
+                    if(intersect):
+                        self.player_angle = rad
+                        self.intersect_x = x
+                        self.intersect_y = y
+                        break
+                if(intersect):
+                    break
+
+            if(intersect):
+                self.click_params["l"]["held"] = True
+            else:
+                self.click_params["l"]["held"] = False
+
+        else:
+            self.click_params["l"]["held"] = False
+
 
     def update_player(self):
 
-        self.player_angle = self.calc_angle(self.mouse_x, self.player_x, self.mouse_y, self.player_y)
-        # self.player_angle, mag = self.calc_angle_magnitude(self.mouse_x, self.player_x, self.mouse_y, self.player_y)
+        if(self.auto_aim):
+            self.handle_auto_aim()
+        else:
+            self.player_angle = self.calc_angle(self.mouse_x, self.player_x, self.mouse_y, self.player_y)
+
         self.player_shape = self.calc_player_shape(self.player_x, self.player_y, self.player_radius, self.player_angle)
 
 
@@ -1050,6 +1137,7 @@ class MainWindow(QMainWindow):
 
     def mouseMoveEvent(self, event):
 
+
         x = event.x()
         y = event.y()
 
@@ -1059,7 +1147,7 @@ class MainWindow(QMainWindow):
         self.mouse_y = y
 
         # print("move",x,y)
-
+        if(self.auto_aim): return
         if(self.paused): return
 
         self.update_player()
@@ -1067,6 +1155,7 @@ class MainWindow(QMainWindow):
 
     def mousePressEvent(self, event):
         if(self.paused): return
+        if(self.auto_aim): return
 
         # QMouseEvent
         b = event.button()
@@ -1084,6 +1173,7 @@ class MainWindow(QMainWindow):
         self.click(left, False)
 
     def mouseReleaseEvent(self, event):
+        if(self.auto_aim): return
         b = event.button()
 
         if(b != Qt.RightButton and b != Qt.LeftButton):
@@ -1131,6 +1221,11 @@ class MainWindow(QMainWindow):
                         self.paused = False
 
                 if(self.paused): return 0
+
+                elif(key == Qt.Key_A):
+                    self.auto_aim = not(self.auto_aim)
+                    self.click_params["l"]["held"] = False
+
 
                 elif(key == Qt.Key_D):
                     self.debug = not(self.debug)
