@@ -17,13 +17,13 @@ def printf(fmt, *args):
         print(fmt, end="")
 
 class Explosion():
-    def __init__(self, x, y, damaging):
+    def __init__(self, x, y, max_r, duration, damaging):
         # self.spawnx, self.spawny = gui.adj_coords(x,y)
         self.x = x
         self.y = y
         self.r = 0
-        self.delta_r = 1.8
-        self.maxr = 30
+        self.max_r = max_r
+        self.delta_r = (self.max_r*2*16)/duration
         self.delete = False
         self.colors = [
                 QColor(0xff, 0x00, 0x00),
@@ -37,7 +37,7 @@ class Explosion():
 
     def update(self):
 
-        if(self.r >= self.maxr):
+        if(self.r >= self.max_r):
             self.delta_r *= -1
 
         self.r += self.delta_r
@@ -51,54 +51,54 @@ class Explosion():
 
 
 class Bullet():
-
-    # def __init__(self, x, y, angle, radius, speed, _type, explosive):
-    def __init__(self, params, _type, x, y, angle, explosive, speed_mult):
-
-        # self.spawnx, self.spawny = gui.adj_coords(x,y)
+    def __init__(self, params, _type, x, y, angle, explosive, penetrating):
         self.params = params
         self.fx = x
         self.fy = y
         self.x = x
         self.y = y
-        # self.x_prior = x
-        # self.y_prior = y
         self.angle = angle
         self.delete = False
         self.type = _type
         self.explosive = explosive or params["explosive"]
+        self.penetrating = penetrating or params["penetrating"]
         self.speed = params["speed"]
         # self.xs = []
         # self.ys = []
-        self.color = QColor(params["color"])
         self.r = params["radius"]
+        self.color = QColor(params["color"])
+        if(self.penetrating):
+            self.color = QColor(0x000000)
 
+    def on_enemy_collision(self):
+        if(not(self.penetrating)):
+            self.delete = True
 
     def update(self):
         ax, ay = gui.adj_coords(self.fx, self.fy)
         x = self.speed*math.cos(self.angle)+ax
         y = self.speed*math.sin(self.angle)+ay
         self.fx, self.fy = gui.win_coords(x,y)
-        # self.x_prior = self.x
-        # self.y_prior = self.y
         self.x = int(self.fx)
         self.y = int(self.fy)
         # self.xs.append(self.x)
         # self.ys.append(self.y)
         # if(gui.off_window(self.x, self.y)):
-        if(not gui.inside_arena(self.x, self.y)):
+        if(not gui.inside_arena(self.x, self.y, self.r)):
             self.delete = True
             # gui.spawn_explosion(self.x, self.y)
 
     def draw(self, painter):
-        gui.draw_circle(painter, self.x, self.y, self.r, 0, gui.color_none, self.color)
-        # for i in range(len(self.xs)):
-        #     gui.draw_circle(painter, self.xs[i], self.ys[i], self.r, 0, gui.color_none, QColor(0,0,0))
+        pw = 0
+        pcolor = gui.color_none
+        if(self.explosive):
+            pw = 1
+            pcolor = QColor(0xf00000)
 
+        gui.draw_circle(painter, self.x, self.y, self.r, pw, pcolor, self.color)
 
 
 class Enemy():
-    # def __init__(self, x, y, radius, speed, _type=0):
     def __init__(self, params, _type, x=None, y=None):
 
         self.params = params
@@ -114,11 +114,6 @@ class Enemy():
         self.fy = y
         self.x = x
         self.y = y
-        # # spawn point
-        # self.x0 = x
-        # self.y0 = y
-        # self.x_prior = x
-        # self.y_prior = y
         self.angle = 0
         self.delete = False
         self.type = _type
@@ -153,12 +148,24 @@ class Enemy():
         else:
             self.rand_angle()
 
+    def on_bullet_collision(self, bullet):
+        # er = self.r*1.5
+        gui.spawn_explosion(self.x, self.y, self.r*3, 500, bullet.explosive)
+        self.delete = True
+
+    def on_player_collision(self):
+        gui.spawn_explosion(self.x, self.y, self.r*3, 500, False)
+        self.delete = True
 
     def update(self):
 
+        speed = self.speed
+        if(gui.slow_time):
+            speed /= 3
+
         ax, ay = gui.adj_coords(self.fx, self.fy)
-        x = self.speed*math.cos(self.angle)+ax
-        y = self.speed*math.sin(self.angle)+ay
+        x = speed*math.cos(self.angle)+ax
+        y = speed*math.sin(self.angle)+ay
         self.fx, self.fy = gui.win_coords(x,y)
         self.x = int(self.fx)
         self.y = int(self.fy)
@@ -216,14 +223,26 @@ class MainWindow(QMainWindow):
         self.player_angle = 0
         self.player_radius = 12.5
 
+        self.enemy_spawn_t0 = 0
+        self.max_enemies = [10,20,30,100]
+        self.enemy_spawn_time = [1000,800,500,200]
         self.game_stage = 0
         self.game_stage_times = [15000,15000,15000,15000]
-        self.game_stage_max = len(self.game_stage_times)-1
+        self.game_stage_max = len(self.max_enemies)-1
         self.game_stage_timer = self.get_game_stage_param(self.game_stage_times)
 
+        self.slow_time = False
         self.invincible = False
+        
+        # permanent
         self.rapid_fire = False
         self.explosive = False
+        self.penetrating = False
+
+        # self.rapid_fire = True
+        # self.explosive = True
+        # self.penetrating = True
+
         self.game_over = False
 
         self.set_click_selection(True, 0)
@@ -233,9 +252,7 @@ class MainWindow(QMainWindow):
         self.t0 = datetime.now()
         self.dt = 0
 
-        self.intersect_x = None
-        self.intersect_y = None
-
+        # for gradients
         self.damage_counter = 0
         self.damage_counter_max = 100
         self.damage_counter_incr_value = 5
@@ -278,6 +295,8 @@ class MainWindow(QMainWindow):
         self.arena_w = self.tr_x - self.tl_x
         self.arena_h = self.br_y - self.tr_y
 
+        # "color":0x00ffff,
+        bullet_color = 0x0000a0
 
         # types of bullets
         self.bullet_params = [
@@ -287,10 +306,11 @@ class MainWindow(QMainWindow):
                 "rapid_fire_period":80,
                 "radius":2,
                 "speed":8,
-                "color":0x00ffff,
+                "color":bullet_color,
                 "num":1,
                 "spread":0,
-                "explosive":False
+                "explosive":False,
+                "penetrating":False,
             },
 
             # 1
@@ -299,22 +319,24 @@ class MainWindow(QMainWindow):
                 "rapid_fire_period":200,
                 "radius":10,
                 "speed":2.5,
-                "color":0x00ffff,
+                "color":bullet_color,
                 "num":1,
                 "spread":0,
-                "explosive":False
+                "explosive":False,
+                "penetrating":False,
             },
 
             # 2
             {
-                "fire_period":500,
-                "rapid_fire_period":200,
+                "fire_period":700,
+                "rapid_fire_period":400,
                 "radius":2,
                 "speed":5,
-                "color":0x00ffff,
+                "color":bullet_color,
                 "num":5,
                 "spread":20,
-                "explosive":False
+                "explosive":False,
+                "penetrating":False,
             },
 
             # 3
@@ -323,10 +345,11 @@ class MainWindow(QMainWindow):
                 "rapid_fire_period":200,
                 "radius":2,
                 "speed":8,
-                "color":0x00ffff,
+                "color":bullet_color,
                 "num":50,
                 "spread":90,
-                "explosive":True
+                "explosive":True,
+                "penetrating":True,
             },
         ]
 
@@ -339,7 +362,7 @@ class MainWindow(QMainWindow):
                 "max_radius":10,
                 "min_speed":2,
                 "max_speed":3,
-                "color":0xff0000,
+                "color":0xb00000,
                 "p":[10,30,50]
             },
 
@@ -350,7 +373,8 @@ class MainWindow(QMainWindow):
                 "max_radius":28,
                 "min_speed":2,
                 "max_speed":4,
-                "color":0xffa000,
+                # "color":0xffa000,
+                "color":0xf07000,
                 "p":[90,70,50]
             },
 
@@ -388,11 +412,6 @@ class MainWindow(QMainWindow):
         self.grad_thresh = 100
         self.grad_width = 25
 
-        self.max_enemies = [1]
-        self.max_enemies = [10,20,30,100]
-        self.enemy_spawn_time = [1000,800,500,200]
-        self.enemy_spawn_t0 = 0
-
         self.auto_aim = False
         self.init_game_objects()
 
@@ -412,6 +431,9 @@ class MainWindow(QMainWindow):
         self.initialized = True
         self.repaint()
 
+    # def wheelEvent(self,event):
+    #     adj = (event.angleDelta().y() / 120)
+    #     self.player_radius = bound(self.player_radius + adj, 1, 100000)
 
     def __init__(self):
         super().__init__()
@@ -577,9 +599,9 @@ class MainWindow(QMainWindow):
             return True
         return False
 
-    def inside_arena(self, window_x, window_y):
-        if(window_x < self.tr_x and window_x > self.tl_x):
-            if(window_y < self.br_y and window_y > self.tr_y):
+    def inside_arena(self, window_x, window_y, r):
+        if((window_x+r) < self.tr_x and (window_x-r) > self.tl_x):
+            if((window_y+r) < self.br_y and (window_y-r) > self.tr_y):
                 return True
         return False
 
@@ -1047,8 +1069,8 @@ class MainWindow(QMainWindow):
 
                     if(intersect):
                         self.player_angle = rad
-                        self.intersect_x = x
-                        self.intersect_y = y
+                        # self.intersect_x = x
+                        # self.intersect_y = y
                         break
                 if(intersect):
                     break
@@ -1117,33 +1139,9 @@ class MainWindow(QMainWindow):
             self.click_params[_key]["cooldown"] -= self.timer_ms
             if(self.click_params[_key]["cooldown"] > 0): return
             self.click_params[_key]["cooldown"] = self.click_params[_key]["fire_period"]
-            # if(not(left)):
-            #     print(self.click_params[_key]["cooldown"])
-
-
-        # x = self.player_shape[0][0]
-        # y = self.player_shape[0][1]
-        speed_mult = 1
-        explosive = False
-
-        if(self.rapid_fire): speed_mult = 1.1
-        explosive = self.explosive
 
         params = self.bullet_params[_type]
-
-        self.spawn_bullet(params, _type, explosive, speed_mult)
-        return
-
-
-        # r = self.bullet_params[_type]["radius"]
-        # speed = self.bullet_params[_type]["speed"]*speed_mult
-
-        if(_type in [0,1]):
-            self.spawn_bullet(x, y, self.player_angle, r, speed, _type, explosive)
-        elif(_type == 2):
-            degs = [-10,-5,0,5,10]
-            for d in degs:
-                self.spawn_bullet(x, y, self.player_angle+d*math.pi/180, r, speed, _type, explosive)
+        self.spawn_bullet(params, _type)
 
 
     def mouseMoveEvent(self, event):
@@ -1233,6 +1231,9 @@ class MainWindow(QMainWindow):
 
                 if(self.paused): return 0
 
+                if(key == Qt.Key_V):
+                    self.slow_time = not(self.slow_time)
+
                 elif(key == Qt.Key_A):
                     self.auto_aim = not(self.auto_aim)
                     self.click_params["l"]["held"] = False
@@ -1243,7 +1244,7 @@ class MainWindow(QMainWindow):
 
                 elif(key == Qt.Key_X):
                     x,y = self.get_cursor_pos()
-                    self.spawn_explosion(x,y,False)
+                    self.spawn_explosion(x,y,100,1000,False)
 
                 elif(key == Qt.Key_E):
                     x,y = self.get_cursor_pos()
@@ -1268,8 +1269,7 @@ class MainWindow(QMainWindow):
 
         return 0
 
-    # def spawn_bullet(self, x, y, angle, radius, speed, _type, explosive):
-    def spawn_bullet(self, params, _type, explosive, speed_mult):
+    def spawn_bullet(self, params, _type):
 
         x = self.player_shape[0][0]
         y = self.player_shape[0][1]
@@ -1283,10 +1283,10 @@ class MainWindow(QMainWindow):
             for i in range(num):
                 angle = self.player_angle+(angle_adj*math.pi/180)
                 angle_adj += incr
-                b = Bullet(params, _type, x, y, angle, explosive, speed_mult)
+                b = Bullet(params, _type, x, y, angle, self.explosive, self.penetrating)
                 self.bullets.append(b)
         else:
-            b = Bullet(params, _type, x, y, self.player_angle, explosive, speed_mult)
+            b = Bullet(params, _type, x, y, self.player_angle, self.explosive, self.penetrating)
             self.bullets.append(b)
 
 
@@ -1317,11 +1317,10 @@ class MainWindow(QMainWindow):
                 if(e.delete): continue
                 dist = self.calc_magnitude(b.x, e.x, b.y, e.y)
                 if(dist < (e.r + b.r)):
-                    e.delete = True
-                    b.delete = True
+                    e.on_bullet_collision(b)
+                    b.on_enemy_collision()
                     if(not(self.game_over)):
                         self.player_kills += 1
-                    self.spawn_explosion(b.x, b.y, b.explosive)
                     continue
         self.enemies_delete()
         self.bullets_delete()
@@ -1331,13 +1330,12 @@ class MainWindow(QMainWindow):
             e = self.enemies[i]
             dist = self.calc_magnitude(self.player_x, e.x, self.player_y, e.y)
             if(dist < (e.r + self.player_radius)):
-                e.delete = True
+                e.on_player_collision()
                 if(self.invincible): continue
-                self.spawn_explosion(e.x, e.y, False)
                 if(not(self.game_over)):
                     self.player_lives -= 1
                     self.damage_counter_incr = self.damage_counter_incr_value
-                if(self.player_lives == 0):
+                if(self.player_lives <= 0):
                     self.game_over = True
                 continue
         self.bullets_delete()
@@ -1416,8 +1414,8 @@ class MainWindow(QMainWindow):
             e = self.explosions[i]
             e.draw(painter)
 
-    def spawn_explosion(self, x, y, damaging):
-        e = Explosion(x,y,damaging)
+    def spawn_explosion(self, x, y, max_r, delta_r, damaging):
+        e = Explosion(x,y,max_r,delta_r,damaging)
         self.explosions.append(e)
 
 
