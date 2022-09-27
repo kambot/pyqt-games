@@ -229,25 +229,45 @@ class PowerUp():
         p["active"] = True
         if(not(p["perm"])):
             p["countdown"] += p["duration"]
+            p["total_duration"] += p["duration"]
         self.delete = True
         # print(gui.power_params)
         gui.spawn_explosion(self.x, self.y, self.r*2, 300, False)
+
+        if(idx == gui.RAPID):
+            gui.set_fire_period()
 
     def update(self):
         self.duration -= gui.timer_ms
         if(self.duration <= 0):
             self.delete = True
 
-    def draw(self, painter):
-        _str = self.params["symbol"]
-        # size = 8
-        # size = self.r+3
-        # w,h = gui.get_text_wh(size, _str)
-        # gui.draw_text(painter, self.x, self.y, gui.CENTERED, QColor(0xffa000), size, _str)
-        # # print(h/2,self.r)
+    def draw_power_up(self, painter, x, y, r, size=None):
 
-        gui.draw_text(painter, self.x, self.y, gui.CENTERED, self.color, self.text_size, _str)
-        gui.draw_circle(painter, self.x, self.y, self.r, 1, QColor(0x000000), gui.color_none)
+        if(size == None):
+            for i in range(1,100):
+                size = i
+                w,h,fm = gui.get_text_wh(size, self.params["symbol"])
+                d = fm.descent()
+                # if(abs((h-d) - r*2) <= 1):
+                if(abs((h) - r*2) <= 2):
+                    break
+
+        _str = self.params["symbol"]
+        # gui.draw_circle(painter, x, y, r, 1, QColor(0x000000), gui.color_none)
+        gui.draw_text(painter, x, y, gui.CENTERED, self.color, size, _str)
+
+    def draw(self, painter):
+        self.draw_power_up(painter, self.x, self.y, self.r, self.text_size)
+        # _str = self.params["symbol"]
+        # # size = 8
+        # # size = self.r+3
+        # # w,h = gui.get_text_wh(size, _str)
+        # # gui.draw_text(painter, self.x, self.y, gui.CENTERED, QColor(0xffa000), size, _str)
+        # # # print(h/2,self.r)
+
+        # gui.draw_text(painter, self.x, self.y, gui.CENTERED, self.color, self.text_size, _str)
+        # gui.draw_circle(painter, self.x, self.y, self.r, 1, QColor(0x000000), gui.color_none)
 
 
 
@@ -277,6 +297,7 @@ class MainWindow(QMainWindow):
                 "perm": False,
                 "duration": 5000,
                 "countdown": 0,
+                "total_duration":0,
                 "color":color,
                 "p":[] #TODO
             },
@@ -289,8 +310,9 @@ class MainWindow(QMainWindow):
                 "perm": False,
                 "duration": 5000,
                 "countdown": 0,
+                "total_duration":0,
                 "color":color,
-                "draw": self.draw_slow_time,
+                # "draw": self.draw_slow_time,
                 "p":[] #TODO
             },
             # 2
@@ -302,6 +324,7 @@ class MainWindow(QMainWindow):
                 "perm": True,
                 "duration": 0,
                 "countdown": 0,
+                "total_duration":0,
                 "color":color,
                 "p":[] #TODO
             },
@@ -314,6 +337,7 @@ class MainWindow(QMainWindow):
                 "perm": True,
                 "duration": 0,
                 "countdown": 0,
+                "total_duration":0,
                 "color":color,
                 "p":[] #TODO
             },
@@ -326,6 +350,7 @@ class MainWindow(QMainWindow):
                 "perm": True,
                 "duration": 0,
                 "countdown": 0,
+                "total_duration":0,
                 "color":color,
                 "p":[] #TODO
             },
@@ -445,7 +470,7 @@ class MainWindow(QMainWindow):
             # 2
             {
                 "fire_period":700,
-                "rapid_fire_period":400,
+                "rapid_fire_period":300,
                 "radius":2,
                 "speed":5,
                 "color":bullet_color,
@@ -525,6 +550,7 @@ class MainWindow(QMainWindow):
         self.BOTTOM_RIGHT = 4
         self.CENTERED_TOP = 5
         self.CENTERED_BOTTOM = 6
+        self.CENTERED_LEFT = 7
 
         # edge detection
         self.grad_thresh = 100
@@ -649,7 +675,6 @@ class MainWindow(QMainWindow):
 
     def get_game_stage_param(self, lst):
         return lst[min(len(lst)-1, self.game_stage)]
-
 
 
     def enemy_timer(self):
@@ -868,32 +893,6 @@ class MainWindow(QMainWindow):
         w = rect.topRight().x() - rect.topLeft().x()
         h = rect.bottomLeft().y() - rect.topLeft().y()
 
-        # works for arial
-        # if(orientation == self.NONE):
-        #     x_adj = x
-        #     y_adj = y
-        # elif(orientation == self.CENTERED):
-        #     x_adj = x-w/2-lb/2
-        #     y_adj = y+h/2-d
-        # elif(orientation == self.TOP_LEFT):
-        #     x_adj = x-lb
-        #     y_adj = y+h-d*2
-        # elif(orientation == self.TOP_RIGHT):
-        #     x_adj = x-w
-        #     y_adj = y+h-d*2
-        # elif(orientation == self.BOTTOM_LEFT):
-        #     x_adj = x-lb
-        #     y_adj = y
-        # elif(orientation == self.BOTTOM_RIGHT):
-        #     x_adj = x-w
-        #     y_adj = y
-        # elif(orientation == self.CENTERED_TOP):
-        #     x_adj = x-w/2-lb/2
-        #     y_adj = y+h-d*2
-        # elif(orientation == self.CENTERED_BOTTOM):
-        #     x_adj = x-w/2-lb/2
-        #     y_adj = y
-
         if(orientation == self.NONE):
             x_adj = x
             y_adj = y
@@ -918,6 +917,9 @@ class MainWindow(QMainWindow):
         elif(orientation == self.CENTERED_BOTTOM):
             x_adj = x-w/2-lb/2
             y_adj = y
+        elif(orientation == self.CENTERED_LEFT):
+            x_adj = x
+            y_adj = y+h/2
 
         painter.drawText(int(x_adj), int(y_adj), _str)
         # painter.drawStaticText(QPoint(x,y),QStaticText(_str))
@@ -951,6 +953,52 @@ class MainWindow(QMainWindow):
         y += fm.height()
         painter.setFont(font)
         painter.drawText(x, y, _str)
+
+    def draw_player_hud(self, painter):
+        self.draw_player_lives(painter)
+        self.draw_game_stage(painter)
+        self.draw_player_kills(painter)
+        self.draw_time(painter)
+        self.draw_player_power_ups(painter)
+
+    def draw_player_power_ups(self, painter):
+        r = 10
+        pad = 5
+        x = self.bl_x + r
+        y = self.bl_y + self.hud_y_offset + r
+
+        for i in range(len(self.power_params)):
+            p = self.power_params[i]
+            if(p["perm"] and p["active"]):
+                pup = PowerUp(p, x, y, r, 0)
+                pup.draw_power_up(painter, x, y, r)
+                x += r + pad
+                # p["description"]
+                w,h,fm = self.draw_text(painter, x, y+r, self.BOTTOM_LEFT, QColor(p["color"]), 14, "(%s)", p["description"])
+                x += w + pad*3 + r*2
+
+        x = self.bl_x + r
+        y += r*2 + pad*3
+        for i in range(len(self.power_params)):
+            p = self.power_params[i]
+            if(not(p["perm"]) and p["active"]):
+                pup = PowerUp(p, x, y, r, 0)
+                pup.draw_power_up(painter, x, y, r)
+
+
+                pen = QPen()
+                pen.setWidth(1)
+                pen.setColor(Qt.black)
+                painter.setRenderHint(QPainter.Antialiasing, True)
+                painter.setPen(pen)
+                painter.setBrush(Qt.black)
+
+                max_width = self.br_x - x - pad*3
+                width = max_width * p["countdown"] / (p["total_duration"])
+                rect = QRect(QPoint(int(x+pad*3), int(y-r/2)), QPoint(int(x+pad*3+width), int(y+r/2)))
+                painter.drawRect(rect)
+
+                y += r*2 + pad*3
 
     def draw_player_lives(self, painter):
         if(self.player_lives <= 0):
@@ -1035,6 +1083,12 @@ class MainWindow(QMainWindow):
         y += h+fm.descent()
 
         w,h,fm = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "Stage Counter: %d", self.game_stage_timer)
+        y += h+fm.descent()
+
+        w,h,fm = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "Fire Periods: %d, %d", self.click_params["l"]["fire_period"], self.click_params["r"]["fire_period"])
+        y += h+fm.descent()
+
+        w,h,fm = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "Fire Cooldown: %d, %d", self.click_params["l"]["cooldown"], self.click_params["r"]["cooldown"])
         y += h+fm.descent()
 
         w,h,fm = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "Damage Counter: %d", self.damage_counter)
@@ -1238,6 +1292,7 @@ class MainWindow(QMainWindow):
                     if(p["countdown"] <= 0):
                         p["active"] = False
                         p["countdown"] = 0
+                        p["total_duration"] = 0
 
 
     def update_player(self):
@@ -1259,6 +1314,9 @@ class MainWindow(QMainWindow):
 
 
     def click_timer(self):
+
+        self.click_params["l"]["cooldown"] -= self.timer_ms
+        self.click_params["r"]["cooldown"] -= self.timer_ms
 
         if(self.click_params["l"]["held"]):
             self.click(True, True)
@@ -1282,10 +1340,9 @@ class MainWindow(QMainWindow):
         _type = self.click_params[_key]["selection"]
         if(_type < 0 or _type >= len(self.bullet_params)): return
 
-        if(hold):
-            self.click_params[_key]["cooldown"] -= self.timer_ms
-            if(self.click_params[_key]["cooldown"] > 0): return
-            self.click_params[_key]["cooldown"] = self.click_params[_key]["fire_period"]
+        self.click_params[_key]["cooldown"] -= self.timer_ms
+        if(self.click_params[_key]["cooldown"] > 0): return
+        self.click_params[_key]["cooldown"] = self.click_params[_key]["fire_period"]
 
         params = self.bullet_params[_type]
         self.spawn_bullet(params, _type)
@@ -1324,7 +1381,8 @@ class MainWindow(QMainWindow):
         if(left): _key = "l"
         else: _key = "r"
 
-        self.click_params[_key]["cooldown"] = self.click_params[_key]["fire_period"]
+        # can't click faster than fire period
+        # self.click_params[_key]["cooldown"] = self.click_params[_key]["fire_period"]
         self.click_params[_key]["held"] = True
         self.click(left, False)
 
@@ -1680,14 +1738,6 @@ class MainWindow(QMainWindow):
         rect = QRect(QPoint(self.tl_x, self.tl_y), QPoint(self.br_x, self.br_y))
 
         painter.drawRect(rect)
-
-    def draw_player_hud(self, painter):
-        self.draw_player_lives(painter)
-        self.draw_game_stage(painter)
-        self.draw_player_kills(painter)
-        self.draw_time(painter)
-        # self.draw_weapon_selection(painter)
-
 
     def resizeEvent(self, event):
         print("resize", self.width(), self.height())
