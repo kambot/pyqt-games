@@ -241,17 +241,18 @@ class PowerUp():
 
     def on_bullet_collision(self):
         idx = self.params["idx"]
+        p = gui.power_params[idx]
 
         if(idx == gui.LIFE):
             gui.player_lives += 1
         elif(idx == gui.GUN):
+            p["active"] = True
             gui.set_click_selection(False, 2)
         else:
-            p = gui.power_params[idx]
-            p["active"] = True
             if(not(p["perm"])):
                 p["countdown"] += p["duration"]
                 p["total_duration"] += p["duration"]
+            p["active"] = True
             # print(gui.power_params)
 
             if(idx == gui.RAPID):
@@ -307,6 +308,8 @@ class MainWindow(QMainWindow):
     def init_game_objects(self):
 
         print("init_game_objects")
+
+        self.game_over = False
 
         self.INV = 0
         self.SLOW = 1
@@ -409,10 +412,10 @@ class MainWindow(QMainWindow):
             # 6
             {
                 "idx": self.GUN,
-                "special": True,
+                "special": False,
                 "description": "Secondary",
                 "active": False,
-                "symbol": "s",
+                "symbol": "S",
                 "perm": True,
                 "duration": 0,
                 "countdown": 0,
@@ -438,19 +441,19 @@ class MainWindow(QMainWindow):
         self.player_shape = []
         self.player_angle = 0
         self.player_radius = 12.5
+        # self.player_radius = min(self.scale_w,self.scale_h)*self.player_radius
 
         self.enemy_spawn_t0 = 0
-        self.max_enemies = [10,20,30,100]
+        self.max_enemies = [10,1,30,100]
         self.enemy_spawn_time = [1000,800,500,200]
         self.game_stage = 0
-        self.game_stage_times = [15000,15000,15000,15000]
+        self.game_stage_times = [15000,30000,15000,15000]
         # self.game_stage_times = [1,1,1,1]
         self.power_up_probs = [5, 25, 50, 100]
         self.power_up_probs = [100]
         self.game_stage_max = len(self.max_enemies)-1
         self.game_stage_timer = self.get_game_stage_param(self.game_stage_times)
 
-        self.game_over = False
 
         self.set_click_selection(True, 0)
         self.set_click_selection(False, -1)
@@ -473,22 +476,32 @@ class MainWindow(QMainWindow):
 
         self.w = self.width()
         self.h = self.height()
-        self.setGeometry(0, 0, self.w, self.h)
+        # self.setGeometry(0, 0, self.w, self.h)
         # self.setFixedWidth(self.w)
         # self.setFixedHeight(self.h)
         # print(self.desktop.devicePixelRatio())
-        # print(self.w, self.h)
+
+        self.kam_w = 2560
+        self.kam_h = 1359
+
+        self.scale_w = self.w/self.kam_w
+        self.scale_h = self.h/self.kam_h
 
         self.center_x = int(self.w/2)
         self.center_y = int(self.h/2)
 
-        # minimum margins
-        self.margin_left = 300
-        self.margin_right = 300
-        self.margin_top = 200
-        self.margin_bottom = 200
+        self.margin_left = int(300 * self.scale_w)
+        self.margin_right = int(300 * self.scale_w)
+        self.margin_top = int(200 * self.scale_h)
+        self.margin_bottom = int(200 * self.scale_h)
 
-        self.hud_y_offset = 5
+        self.hud_y_offset = int(5 * self.scale_h)
+
+        # self.margin_left = 300
+        # self.margin_right = 300
+        # self.margin_top = 200
+        # self.margin_bottom = 200
+        # self.hud_y_offset = 5
 
         # arena info
         self.tl_x = int(self.margin_left)
@@ -677,7 +690,7 @@ class MainWindow(QMainWindow):
         self.initialized = False
         self.color_none = QColor(0,0,0,0)
         self.paused = False
-        self.game_over = False
+        # self.game_over = False
         self.debug = False
         self.show_mouse = True
 
@@ -698,8 +711,14 @@ class MainWindow(QMainWindow):
         self.screen = self.desktop.screenGeometry(self.screen_index) # select monitor if available
         self.desktop.activateWindow()
 
+        self.screen_w = self.screen.width()
+        self.screen_h = self.screen.height()
+
         self.show()
         self.setWindowState(Qt.WindowMaximized)
+        # self.setGeometry(0, 0, int(2560/4), int(1359/2))
+        # self.setGeometry(0, 0, self.screen_w, self.screen_h)
+
 
     def reload(self):
         self.init_game_objects()
@@ -958,6 +977,8 @@ class MainWindow(QMainWindow):
         if(len(_str) == 0):
             return 0,0,None
 
+        # size = max(8,int(self.scale_w*size))
+
         pen = QPen()
         pen.setWidth(1)
         pen.setColor(color)
@@ -1050,6 +1071,9 @@ class MainWindow(QMainWindow):
         self.draw_time(painter)
         self.draw_player_power_ups(painter)
 
+    # TODO: make better
+    # move to right side of screen
+    # gray text when not active, colored when active
     def draw_player_power_ups(self, painter):
         r = 10
         pad = 5
