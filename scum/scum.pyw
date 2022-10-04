@@ -175,7 +175,7 @@ class Enemy():
 
         speed = self.speed
         if(gui.power_params[gui.SLOW]["active"]):
-            speed /= 3
+            speed *= gui.slow_mult
 
         ax, ay = gui.adj_coords(self.fx, self.fy)
         x = speed*math.cos(self.angle)+ax
@@ -244,7 +244,7 @@ class PowerUp():
         p = gui.power_params[idx]
 
         if(idx == gui.LIFE):
-            gui.player_lives += 1
+            gui.player_lives = min(gui.player_lives+1, gui.max_player_lives)
         elif(idx == gui.GUN):
             p["active"] = True
             gui.set_click_selection(False, 2)
@@ -356,7 +356,7 @@ class MainWindow(QMainWindow):
                 "idx": self.EXP,
                 "special": False,
                 "description": "Explosive Bullets",
-                "active": False, 
+                "active": False,
                 "symbol": "E",
                 "perm": True,
                 "duration": 0,
@@ -412,7 +412,7 @@ class MainWindow(QMainWindow):
             # 6
             {
                 "idx": self.GUN,
-                "special": False,
+                "special": True,
                 "description": "Secondary",
                 "active": False,
                 "symbol": "S",
@@ -425,6 +425,8 @@ class MainWindow(QMainWindow):
             },
         ]
 
+        self.slow_mult = 1/3
+
         self.power_ups = []
         self.explosions = []
         self.bullets = []
@@ -434,6 +436,7 @@ class MainWindow(QMainWindow):
         self.mouse_off_window = self.off_window(self.mouse_x, self.mouse_y)
 
         self.player_lives = 3+1
+        self.max_player_lives = 10
         self.player_kills = 0
         self.player_x = self.center_x
         self.player_y = self.center_y
@@ -451,6 +454,7 @@ class MainWindow(QMainWindow):
         # self.game_stage_times = [1,1,1,1]
         self.power_up_probs = [5, 25, 50, 100]
         self.power_up_probs = [100]
+        self.max_power_ups = 10
         self.game_stage_max = len(self.max_enemies)-1
         self.game_stage_timer = self.get_game_stage_param(self.game_stage_times)
 
@@ -800,9 +804,8 @@ class MainWindow(QMainWindow):
             ps = [] # probabilities
             p_sum = 0
             for i in range(num_enemy_types):
-                p = self.get_game_stage_param(self.enemy_params[i]["p"])+p_sum
-                p_sum += p
-                ps.append(p)
+                p_sum += self.get_game_stage_param(self.enemy_params[i]["p"])
+                ps.append(p_sum)
 
             r = self.rand_range(1,max(ps))
             for i in range(num_enemy_types):
@@ -830,7 +833,7 @@ class MainWindow(QMainWindow):
 
         self.draw_arena(painter)
         self.draw_player_hud(painter)
-  
+
         self.draw_pause(painter)
         self.draw_game_over(painter)
 
@@ -975,7 +978,7 @@ class MainWindow(QMainWindow):
             _str = fmt
 
         if(len(_str) == 0):
-            return 0,0,None
+            return 0,0,None,None,None
 
         # size = max(8,int(self.scale_w*size))
 
@@ -1031,11 +1034,14 @@ class MainWindow(QMainWindow):
             x_adj = x
             y_adj = y+h/2
 
+        xdelta = x_adj-x
+        ydelta = y_adj-y
+
         painter.drawText(int(x_adj), int(y_adj), _str)
         # painter.drawStaticText(QPoint(x,y),QStaticText(_str))
         # self.draw_circle(painter, int(x), int(y), 1, 1, self.color_none, Qt.blue)
         # self.draw_circle(painter, int(x_adj), int(y_adj), 1, 1, self.color_none, Qt.red)
-        return w,h,fm
+        return w,h,fm,xdelta,ydelta
 
 
     def draw_weapon_selection(self, painter):
@@ -1071,46 +1077,60 @@ class MainWindow(QMainWindow):
         self.draw_time(painter)
         self.draw_player_power_ups(painter)
 
-    # TODO: make better
-    # move to right side of screen
-    # gray text when not active, colored when active
     def draw_player_power_ups(self, painter):
+        vpad = 10
+        hpad = 20
         r = 10
-        pad = 5
-        x = self.bl_x + r
-        y = self.bl_y + self.hud_y_offset + r
+        size = 16
+        gray = QColor(0x303030)
 
-        for i in range(len(self.power_params)):
-            p = self.power_params[i]
-            if(p["perm"] and p["active"] and not(p["special"])):
-                pup = PowerUp(p, x, y, r, 0)
-                pup.draw_power_up(painter, x, y, r)
-                x += r + pad
-                # p["description"]
-                w,h,fm = self.draw_text(painter, x, y+r, self.BOTTOM_LEFT, QColor(p["color"]), 14, "(%s)", p["description"])
-                x += w + pad*3 + r*2
+        x = self.tr_x
+        y = self.tr_y
 
-        x = self.bl_x + r
-        y += r*2 + pad*3
-        for i in range(len(self.power_params)):
-            p = self.power_params[i]
-            if(not(p["perm"]) and p["active"] and not(p["special"])):
-                pup = PowerUp(p, x, y, r, 0)
-                pup.draw_power_up(painter, x, y, r)
 
-                pen = QPen()
-                pen.setWidth(1)
-                pen.setColor(Qt.black)
-                painter.setRenderHint(QPainter.Antialiasing, True)
-                painter.setPen(pen)
-                painter.setBrush(Qt.black)
+        perm_condition = True
 
-                max_width = self.br_x - x - pad*3
-                width = max_width * p["countdown"] / p["total_duration"]
-                rect = QRect(QPoint(int(x+pad*3), int(y-r/2)), QPoint(int(x+pad*3+width), int(y+r/2)))
-                painter.drawRect(rect)
+        for _ in range(2):
 
-                y += r*2 + pad*3
+            for i in range(len(self.power_params)):
+                p = self.power_params[i]
+                if(p["special"]): continue
+                if(p["perm"] != perm_condition): continue
+
+                # TODO: figure out how to draw power ups
+                # pup = PowerUp(p, x, y, r, 0)
+
+                _x = x+hpad
+                _y = y+vpad
+
+                if(p["active"]):
+                    color1 = QColor(p["color"])
+                    color2 = Qt.black
+                else:
+                    color1 = gray
+                    color2 = gray
+
+                _str = p["symbol"]
+                w,h,fm,xd,yd = self.draw_text(painter, _x, _y, self.TOP_LEFT, color1, size, _str)
+                y += h+fm.descent()+vpad
+                _x += w
+
+                _str = " : %s" % p["description"]
+                w,h,fm,_,_ = self.draw_text(painter, _x+xd, _y+yd, self.NONE, color2, size, _str)
+                _x += w
+
+                if(not(p["perm"]) and p["active"]):
+                    _str = ": %d" % int(p["countdown"]/1000)
+                    w,h,fm,_,_ = self.draw_text(painter, _x+xd, _y+yd, self.NONE, color2, size, _str)
+
+                    # max_width = self.br_x - x - pad*3
+                    # width = max_width * p["countdown"] / p["total_duration"]
+                    # rect = QRect(QPoint(int(x+pad*3), int(y-r/2)), QPoint(int(x+pad*3+width), int(y+r/2)))
+                    # painter.drawRect(rect)
+
+
+            perm_condition = not(perm_condition)
+
 
     def draw_player_lives(self, painter):
         if(self.player_lives <= 0):
@@ -1159,7 +1179,8 @@ class MainWindow(QMainWindow):
         if(not(self.debug)): return
 
         # # player angle line
-        # self.draw_player_angle_line(painter)
+        # self.draw_player_angle_line(painter, self.bullet_params[2]["spread"])
+        # self.draw_player_angle_line(painter, 0)
 
         # # player collision
         # self.draw_circle(painter, self.player_x, self.player_y, self.player_radius, 1, Qt.blue, self.color_none)
@@ -1169,61 +1190,61 @@ class MainWindow(QMainWindow):
         size = 14
 
 
-        w,h,fm = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "FPS: %.1f", self.fps_display)
+        w,h,fm,xd,yd = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "FPS: %.1f", self.fps_display)
         y += h+fm.descent()
 
-        w,h,fm = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "Angle: %.2f (%.2f)", self.player_angle, self.player_angle * 180 / math.pi)
+        w,h,fm,xd,yd = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "Angle: %.2f (%.2f)", self.player_angle, self.player_angle * 180 / math.pi)
         y += h+fm.descent()
-    
-        w,h,fm = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "Mouse (win): %d, %d", self.mouse_x, self.mouse_y)
+
+        w,h,fm,xd,yd = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "Mouse (win): %d, %d", self.mouse_x, self.mouse_y)
         y += h+fm.descent()
 
         adj_mouse_x, adj_mouse_y = self.adj_coords(self.mouse_x, self.mouse_y)
-        w,h,fm = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "Mouse (adj): %d, %d", adj_mouse_x, adj_mouse_y)
+        w,h,fm,xd,yd = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "Mouse (adj): %d, %d", adj_mouse_x, adj_mouse_y)
         y += h+fm.descent()
 
-        w,h,fm = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "Fire Period: %d, %d", self.click_params["l"]["fire_period"], self.click_params["r"]["fire_period"])
+        w,h,fm,xd,yd = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "Fire Period: %d, %d", self.click_params["l"]["fire_period"], self.click_params["r"]["fire_period"])
         y += h+fm.descent()
 
-        w,h,fm = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "Fire Cooldown: %d, %d", self.click_params["l"]["cooldown"], self.click_params["r"]["cooldown"])
+        w,h,fm,xd,yd = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "Fire Cooldown: %d, %d", self.click_params["l"]["cooldown"], self.click_params["r"]["cooldown"])
         y += h+fm.descent()
 
-        w,h,fm = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "Damage Counter: %d", self.damage_counter)
-        y += h+fm.descent()
-
-
-        y += h+fm.descent()
-        w,h,fm = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "Bullets: %d", len(self.bullets))
-        y += h+fm.descent()
-        
-        w,h,fm = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "Enemies: %d", len(self.enemies))
-        y += h+fm.descent()
-
-        w,h,fm = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "Explosions: %d", len(self.explosions))
-        y += h+fm.descent()
-
-        w,h,fm = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "Power-ups: %d", len(self.power_ups))
+        w,h,fm,xd,yd = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "Damage Counter: %d", self.damage_counter)
         y += h+fm.descent()
 
 
         y += h+fm.descent()
-        w,h,fm = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "Stage Counter: %d", self.game_stage_timer)
+        w,h,fm,xd,yd = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "Bullets: %d", len(self.bullets))
         y += h+fm.descent()
 
-        w,h,fm = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "Max Enemies: %d", self.get_game_stage_param(self.max_enemies))
+        w,h,fm,xd,yd = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "Enemies: %d", len(self.enemies))
         y += h+fm.descent()
 
-        w,h,fm = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "Spawn Time: %d", self.get_game_stage_param(self.enemy_spawn_time))
+        w,h,fm,xd,yd = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "Explosions: %d", len(self.explosions))
         y += h+fm.descent()
 
-        w,h,fm = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "Power-up Prob: %d", self.get_game_stage_param(self.power_up_probs))
+        w,h,fm,xd,yd = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "Power-ups: %d", len(self.power_ups))
         y += h+fm.descent()
 
-        # w,h,fm = self.draw_text(painter, self.bl_x, self.bl_y, self.CENTERED, Qt.black, 32, "DEBUG")
+
+        y += h+fm.descent()
+        w,h,fm,xd,yd = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "Stage Counter: %d", self.game_stage_timer)
+        y += h+fm.descent()
+
+        w,h,fm,xd,yd = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "Max Enemies: %d", self.get_game_stage_param(self.max_enemies))
+        y += h+fm.descent()
+
+        w,h,fm,xd,yd = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "Spawn Time: %d", self.get_game_stage_param(self.enemy_spawn_time))
+        y += h+fm.descent()
+
+        w,h,fm,xd,yd = self.draw_text(painter, x, y, self.TOP_LEFT, Qt.black, size, "Power-up Prob: %d", self.get_game_stage_param(self.power_up_probs))
+        y += h+fm.descent()
+
+        # w,h,fm,xd,yd = self.draw_text(painter, self.bl_x, self.bl_y, self.CENTERED, Qt.black, 32, "DEBUG")
 
 
 
-    def draw_player_angle_line(self, painter):
+    def draw_player_angle_line(self, painter, spread=0):
         pen = QPen()
         pen.setWidth(1)
         pen.setColor(Qt.gray)
@@ -1240,9 +1261,20 @@ class MainWindow(QMainWindow):
         _x2 = l*math.cos(self.player_angle) + adj_x
         _y2 = l*math.sin(self.player_angle) + adj_y
         x2, y2 = self.win_coords(_x2, _y2)
-
         painter.drawLine(int(x2), int(y2), int(x1), int(y1))
 
+        if(spread != 0):
+            rad_spread = spread*math.pi/180
+
+            _x2 = l*math.cos(self.player_angle+rad_spread/2) + adj_x
+            _y2 = l*math.sin(self.player_angle+rad_spread/2) + adj_y
+            x2, y2 = self.win_coords(_x2, _y2)
+            painter.drawLine(int(x2), int(y2), int(x1), int(y1))
+
+            _x2 = l*math.cos(self.player_angle-rad_spread/2) + adj_x
+            _y2 = l*math.sin(self.player_angle-rad_spread/2) + adj_y
+            x2, y2 = self.win_coords(_x2, _y2)
+            painter.drawLine(int(x2), int(y2), int(x1), int(y1))
 
     def draw_pause(self, painter):
         if(self.paused):
@@ -1262,7 +1294,7 @@ class MainWindow(QMainWindow):
             _str = "GAME OVER"
             x = self.center_x
             y = self.center_y - self.arena_h/4
-            w,h,fm = self.draw_text(painter, x, y, self.CENTERED, Qt.red, size, _str)
+            w,h,fm,xd,yd = self.draw_text(painter, x, y, self.CENTERED, Qt.red, size, _str)
 
             y += h/2 + fm.descent()
             self.draw_text(painter, x, y, self.CENTERED_TOP, Qt.black, 16, "(press r to restart)")
@@ -1376,9 +1408,13 @@ class MainWindow(QMainWindow):
 
                     shape = self.calc_player_shape(self.player_x, self.player_y, self.player_radius, rad)
 
+                    speed = e.speed
+                    if(self.power_params[self.SLOW]["active"]):
+                        speed *= self.slow_mult
+
                     intersect,x,y = self.will_intersect(
                                             shape[0][0], shape[0][1], self.bullet_params[0]["speed"], rad, self.bullet_params[0]["radius"],
-                                            e.fx, e.fy, e.speed, e.angle, e.r
+                                            e.fx, e.fy, speed, e.angle, e.r
                                         )
 
                     if(intersect):
@@ -1436,8 +1472,12 @@ class MainWindow(QMainWindow):
 
     def click_timer(self):
 
-        self.click_params["l"]["cooldown"] -= self.timer_ms
-        self.click_params["r"]["cooldown"] -= self.timer_ms
+        if(self.click_params["l"]["cooldown"] > 0):
+            self.click_params["l"]["cooldown"] = max(self.click_params["l"]["cooldown"]-self.timer_ms,0)
+
+
+        if(self.click_params["r"]["cooldown"] > 0):
+            self.click_params["r"]["cooldown"] = max(self.click_params["r"]["cooldown"]-self.timer_ms,0)
 
         if(self.click_params["l"]["held"]):
             self.click(True, True)
@@ -1607,6 +1647,8 @@ class MainWindow(QMainWindow):
         return 0
 
     def spawn_rand_power_up(self, x, y):
+        if(len(self.power_ups) >= self.max_power_ups):
+            return
         p = self.get_game_stage_param(self.power_up_probs)
         r = self.rand_range(1,100)
 
@@ -1616,9 +1658,8 @@ class MainWindow(QMainWindow):
             ps = [] # probabilities
             p_sum = 0
             for i in range(num_powerup_types):
-                p = self.get_game_stage_param(self.power_params[i]["p"])+p_sum
-                p_sum += p
-                ps.append(p)
+                p_sum += self.get_game_stage_param(self.power_params[i]["p"])
+                ps.append(p_sum)
 
             r = self.rand_range(1,max(ps))
             for i in range(num_powerup_types):
@@ -1644,7 +1685,7 @@ class MainWindow(QMainWindow):
         for i in range(len(self.power_ups)):
             p = self.power_ups[i]
             p.update()
-    
+
     def power_ups_delete(self):
         power_ups = self.power_ups.copy()
         self.power_ups = []
@@ -1676,14 +1717,19 @@ class MainWindow(QMainWindow):
         num = params["num"]
         spread = params["spread"]
 
+        # colors = []
+        # colors1 = [0xff0000,0x00ff00,0x0000ff,0xffffff]
+        # for i in range(100):
+        #     colors.append(colors1[i%len(colors1)])
+
         if(num > 1 and spread != 0):
-            incr = spread/num
-            angle_adj = -1*spread/2
+            incr = spread / (num-1)
+            angle_adj = -1*incr*math.pi/180
+            angle = self.player_angle + (spread/2*math.pi/180)
             for i in range(num):
-                angle = self.player_angle+(angle_adj*math.pi/180)
-                angle_adj += incr
                 b = Bullet(params, _type, x, y, angle, self.power_params[self.EXP]["active"], self.power_params[self.PEN]["active"])
                 self.bullets.append(b)
+                angle += (angle_adj)
         else:
             b = Bullet(params, _type, x, y, self.player_angle, self.power_params[self.EXP]["active"], self.power_params[self.PEN]["active"])
             self.bullets.append(b)
